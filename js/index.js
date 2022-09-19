@@ -60,10 +60,7 @@ function touchingPanel(panel, gridSize) {
         }
         var px = pos[0], py = pos[1];
         var _c = asRect(pSize), pw = _c[0], ph = _c[1];
-        return (x > px - gridSize &&
-            x < px + pw &&
-            y > py - gridSize &&
-            y < py + ph);
+        return x > px - gridSize && x < px + pw && y > py - gridSize && y < py + ph;
     };
 }
 function componentsInGroup(_a) {
@@ -127,10 +124,10 @@ function DOM_onmousedown(ctx) {
         var _a;
         e.preventDefault();
         var _b = ctx.graphics, _c = _b.pan, panX = _c[0], panY = _c[1], scale = _b.scale, gridSize = _b.gridSize;
+        var halfGrid = gridSize / 2;
         var components = ctx.components.filter(function (_a) {
             var _b = _a.pos, x = _b[0], y = _b[1], size = _a.size;
             var _c = mouseInCtx(ctx, e.clientX, e.clientY), px = _c[0], py = _c[1];
-            var halfGrid = gridSize / 2;
             if (Array.isArray(size)) {
                 var w = size[0], h = size[1];
                 return px >= x && px <= x + w && py >= y && py <= y + h;
@@ -151,13 +148,13 @@ function DOM_onmousedown(ctx) {
                 }
                 else if (component.type === "panel" &&
                     Array.isArray(component.size)) {
-                    component.size[0] /= gridSize;
-                    component.size[1] /= gridSize;
+                    component.size[0] /= halfGrid;
+                    component.size[1] /= halfGrid;
                     var prompted = prompt("Panel size", component.size.toString());
                     var _d = (_a = prompted === null || prompted === void 0 ? void 0 : prompted.split(/, ?/).map(Number)) !== null && _a !== void 0 ? _a : [0, 0], w = _d[0], h = _d[1];
                     component.size = [w || component.size[0], h || component.size[1]];
-                    component.size[0] *= gridSize;
-                    component.size[1] *= gridSize;
+                    component.size[0] *= halfGrid;
+                    component.size[1] *= halfGrid;
                 }
                 //Drag component
             }
@@ -239,7 +236,7 @@ function componentClick(e, ctx, component) {
         if (componentFrom) {
             component.incoming.push(componentFrom);
         }
-        ctx.connectingFrom = undefined;
+        ctx.connectingFrom = e.ctrlKey ? ctx.connectingFrom : undefined;
     }
     else if (!isPanel) {
         //Start a wire
@@ -355,7 +352,7 @@ function saveComponents(components) {
         c.group = undefined;
     });
     //Save as JSON
-    var json = JSON.stringify(isolatedComponents, null, 2);
+    var json = JSON.stringify(isolatedComponents);
     var blob = new Blob([json], { type: "application/json" });
     var a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -455,7 +452,7 @@ function tick(ctx) {
             gtx.fillStyle = live ? "#fff" : "#000";
             gtx.fillText(text, x, y + 1);
         };
-        panels.forEach(drawComponent);
+        panels.reverse().forEach(drawComponent);
         //Draw connections on top of panels
         gtx.lineWidth = 2;
         components.forEach(function (_a) {
@@ -475,7 +472,7 @@ function tick(ctx) {
             });
         });
         //Draw all other components on top of connections
-        other.forEach(drawComponent);
+        other.reverse().forEach(drawComponent);
     };
 }
 function calculateCharge(component) {

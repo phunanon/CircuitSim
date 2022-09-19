@@ -84,12 +84,7 @@ function touchingPanel(panel: Component, gridSize: number) {
     }
     const [px, py] = pos;
     const [pw, ph] = asRect(pSize);
-    return (
-      x > px - gridSize &&
-      x < px + pw &&
-      y > py - gridSize &&
-      y < py + ph
-    );
+    return x > px - gridSize && x < px + pw && y > py - gridSize && y < py + ph;
   };
 }
 
@@ -156,9 +151,9 @@ function DOM_onmousedown(ctx: Ctx) {
       scale,
       gridSize,
     } = ctx.graphics;
+    const halfGrid = gridSize / 2;
     const components = ctx.components.filter(({ pos: [x, y], size }) => {
       const [px, py] = mouseInCtx(ctx, e.clientX, e.clientY);
-      const halfGrid = gridSize / 2;
       if (Array.isArray(size)) {
         const [w, h] = size;
         return px >= x && px <= x + w && py >= y && py <= y + h;
@@ -181,13 +176,13 @@ function DOM_onmousedown(ctx: Ctx) {
           component.type === "panel" &&
           Array.isArray(component.size)
         ) {
-          component.size[0] /= gridSize;
-          component.size[1] /= gridSize;
+          component.size[0] /= halfGrid;
+          component.size[1] /= halfGrid;
           const prompted = prompt("Panel size", component.size.toString());
           const [w, h] = prompted?.split(/, ?/).map(Number) ?? [0, 0];
           component.size = [w || component.size[0], h || component.size[1]];
-          component.size[0] *= gridSize;
-          component.size[1] *= gridSize;
+          component.size[0] *= halfGrid;
+          component.size[1] *= halfGrid;
         }
         //Drag component
       } else {
@@ -263,7 +258,7 @@ function componentClick(e: MouseEvent, ctx: Ctx, component: Component) {
     if (componentFrom) {
       component.incoming.push(componentFrom);
     }
-    ctx.connectingFrom = undefined;
+    ctx.connectingFrom = e.ctrlKey ? ctx.connectingFrom : undefined;
   } else if (!isPanel) {
     //Start a wire
     ctx.connectingFrom = component.id;
@@ -384,7 +379,7 @@ function saveComponents(components: Component[]) {
     c.group = undefined;
   });
   //Save as JSON
-  const json = JSON.stringify(isolatedComponents, null, 2);
+  const json = JSON.stringify(isolatedComponents);
   const blob = new Blob([json], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
@@ -494,14 +489,14 @@ function tick(ctx: Ctx) {
       gtx.fillStyle = live ? "#fff" : "#000";
       gtx.fillText(text, x, y + 1);
     };
-    panels.forEach(drawComponent);
+    panels.reverse().forEach(drawComponent);
     //Draw connections on top of panels
     gtx.lineWidth = 2;
     components.forEach(({ pos: [x2, y2], incoming }) => {
       incoming.forEach(({ pos: [x1, y1], live, size }) => {
         const a = -Math.atan2(y2 - y1, x2 - x1);
         gtx.fillStyle = live ? "#00f" : "#f00";
-        const r = (Array.isArray(size) ? size[0]: size) / 8;
+        const r = (Array.isArray(size) ? size[0] : size) / 8;
         gtx.translate(gridHalf, gridHalf);
         gtx.beginPath();
         gtx.moveTo(x1 + sin(a) * r, y1 + cos(a) * r);
@@ -512,7 +507,7 @@ function tick(ctx: Ctx) {
       });
     });
     //Draw all other components on top of connections
-    other.forEach(drawComponent);
+    other.reverse().forEach(drawComponent);
   };
 }
 
