@@ -110,7 +110,7 @@ function DOM_onload() {
   html.addEventListener("mousedown", DOM_onmousedown(ctx));
   html.addEventListener("mousemove", DOM_mousemove(ctx));
   html.addEventListener("mouseup", DOM_onmouseup(ctx));
-  html.addEventListener("keyup", DOM_onkeyup(ctx));
+  html.addEventListener("keydown", DOM_onkeydown(ctx));
   canvas.addEventListener("contextmenu", e => e.preventDefault());
 }
 
@@ -279,8 +279,19 @@ function DOM_onmouseup(ctx: Ctx) {
   };
 }
 
-function DOM_onkeyup(ctx: Ctx) {
+function DOM_onkeydown(ctx: Ctx) {
   return (e: KeyboardEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.ctrlKey) {
+      if (e.key === "s") {
+        saveComponents(ctx.components);
+      }
+      if (e.key === "o") {
+        loadComponents(ctx);
+      }
+      return;
+    }
     const { graphics, components, snapToGrid } = ctx;
     const [x, y] = [
       ctx.mouse[0] - graphics.gridSize / 2,
@@ -289,7 +300,7 @@ function DOM_onkeyup(ctx: Ctx) {
     const newComponentType = keyToType[e.key];
     if (newComponentType) {
       const newComponent: Component = {
-        id: components.length,
+        id: Math.random(),
         pos: [x, y],
         size:
           newComponentType === "panel"
@@ -306,6 +317,65 @@ function DOM_onkeyup(ctx: Ctx) {
       components.push(newComponent);
     }
   };
+}
+
+function saveComponents(components: Component[]) {
+  //Isolate component wires to only included components
+  const includedIds = components.map(c => c.id);
+  const isolatedComponents = components.map(c => ({
+    ...c,
+    incoming: c.incoming.map(i => i.id).filter(i => includedIds.includes(i)),
+  }));
+  //New random IDs
+  const newIds = new Map(includedIds.map(i => [i, Math.random()]));
+  isolatedComponents.forEach(c => {
+    c.id = newIds.get(c.id)!;
+    c.incoming = c.incoming.map(i => newIds.get(i)!);
+  });
+  //Normalise positions
+  const topLeftMost = isolatedComponents.reduce(
+    (acc, c) =>
+      [Math.min(acc[0]!, c.pos[0]), Math.min(acc[1]!, c.pos[1])] as Point,
+    [Infinity, Infinity]
+  );
+  isolatedComponents.forEach(c => {
+    c.pos = [c.pos[0] - topLeftMost[0]!, c.pos[1] - topLeftMost[1]!];
+  });
+  //Save as JSON
+  const json = JSON.stringify(isolatedComponents, null, 2);
+  const blob = new Blob([json], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "components.json";
+  a.click();
+}
+
+function loadComponents(ctx: Ctx) {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.onchange = () => {
+    const file = input.files?.[0];
+    if (!file) {
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const json = reader.result as string;
+      type SavedComponent = Omit<Component, "incoming"> & {
+        incoming: number[];
+      };
+      const savedComponents: SavedComponent[] = JSON.parse(json);
+      savedComponents.forEach(savedComponent => {
+        const component: Component = {
+          ...savedComponent,
+          incoming: savedComponent.incoming.map(id => findById(ctx, id)!),
+        };
+        ctx.components.push(component);
+      });
+    };
+    reader.readAsText(file);
+  };
+  input.click();
 }
 
 function tick(ctx: Ctx) {

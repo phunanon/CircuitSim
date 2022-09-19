@@ -1,4 +1,15 @@
 "use strict";
+var __assign = (this && this.__assign) || function () {
+    __assign = Object.assign || function(t) {
+        for (var s, i = 1, n = arguments.length; i < n; i++) {
+            s = arguments[i];
+            for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p))
+                t[p] = s[p];
+        }
+        return t;
+    };
+    return __assign.apply(this, arguments);
+};
 var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
     if (pack || arguments.length === 2) for (var i = 0, l = from.length, ar; i < l; i++) {
         if (ar || !(i in from)) {
@@ -82,7 +93,7 @@ function DOM_onload() {
     html.addEventListener("mousedown", DOM_onmousedown(ctx));
     html.addEventListener("mousemove", DOM_mousemove(ctx));
     html.addEventListener("mouseup", DOM_onmouseup(ctx));
-    html.addEventListener("keyup", DOM_onkeyup(ctx));
+    html.addEventListener("keydown", DOM_onkeydown(ctx));
     canvas.addEventListener("contextmenu", function (e) { return e.preventDefault(); });
 }
 function findById(ctx, id) {
@@ -249,8 +260,19 @@ function DOM_onmouseup(ctx) {
         }
     };
 }
-function DOM_onkeyup(ctx) {
+function DOM_onkeydown(ctx) {
     return function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.ctrlKey) {
+            if (e.key === "s") {
+                saveComponents(ctx.components);
+            }
+            if (e.key === "o") {
+                loadComponents(ctx);
+            }
+            return;
+        }
         var graphics = ctx.graphics, components = ctx.components, snapToGrid = ctx.snapToGrid;
         var _a = [
             ctx.mouse[0] - graphics.gridSize / 2,
@@ -259,7 +281,7 @@ function DOM_onkeyup(ctx) {
         var newComponentType = keyToType[e.key];
         if (newComponentType) {
             var newComponent = {
-                id: components.length,
+                id: Math.random(),
                 pos: [x, y],
                 size: newComponentType === "panel"
                     ? [graphics.gridSize, graphics.gridSize]
@@ -275,6 +297,53 @@ function DOM_onkeyup(ctx) {
             components.push(newComponent);
         }
     };
+}
+function saveComponents(components) {
+    //Isolate component wires to only included components
+    var includedIds = components.map(function (c) { return c.id; });
+    var isolatedComponents = components.map(function (c) { return (__assign(__assign({}, c), { incoming: c.incoming.map(function (i) { return i.id; }).filter(function (i) { return includedIds.includes(i); }) })); });
+    //New random IDs
+    var newIds = new Map(includedIds.map(function (i) { return [i, Math.random()]; }));
+    isolatedComponents.forEach(function (c) {
+        c.id = newIds.get(c.id);
+        c.incoming = c.incoming.map(function (i) { return newIds.get(i); });
+    });
+    //Normalise positions
+    var topLeftMost = isolatedComponents.reduce(function (acc, c) {
+        return [Math.min(acc[0], c.pos[0]), Math.min(acc[1], c.pos[1])];
+    }, [Infinity, Infinity]);
+    isolatedComponents.forEach(function (c) {
+        c.pos = [c.pos[0] - topLeftMost[0], c.pos[1] - topLeftMost[1]];
+    });
+    //Save as JSON
+    var json = JSON.stringify(isolatedComponents, null, 2);
+    var blob = new Blob([json], { type: "application/json" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "components.json";
+    a.click();
+}
+function loadComponents(ctx) {
+    var input = document.createElement("input");
+    input.type = "file";
+    input.onchange = function () {
+        var _a;
+        var file = (_a = input.files) === null || _a === void 0 ? void 0 : _a[0];
+        if (!file) {
+            return;
+        }
+        var reader = new FileReader();
+        reader.onload = function () {
+            var json = reader.result;
+            var savedComponents = JSON.parse(json);
+            savedComponents.forEach(function (savedComponent) {
+                var component = __assign(__assign({}, savedComponent), { incoming: savedComponent.incoming.map(function (id) { return findById(ctx, id); }) });
+                ctx.components.push(component);
+            });
+        };
+        reader.readAsText(file);
+    };
+    input.click();
 }
 function tick(ctx) {
     return function () {
