@@ -29,7 +29,7 @@ function componentColour(_a) {
     return colours[types.indexOf(type)] || (live ? "#0f0" : "#000");
 }
 var keyToType = __assign({ a: "and", o: "or", n: "not", x: "xor" }, { s: "on", i: "indicator", p: "panel", r: "rand" });
-var abs = Math.abs, sqrt = Math.sqrt, round = Math.round;
+var abs = Math.abs, sqrt = Math.sqrt, sin = Math.sin, cos = Math.cos, round = Math.round;
 function findById(ctx, id) {
     return ctx.components.find(function (c) { return c.id === id; });
 }
@@ -51,17 +51,19 @@ function isPointNearLine(p1, p2, p, dist) {
 function asRect(x) {
     return Array.isArray(x) ? x : [x, x];
 }
-function touchingPanel(_a) {
-    var panelId = _a.id, pos = _a.pos, panelSize = _a.size;
+function touchingPanel(panel, gridSize) {
+    var panelId = panel.id, pos = panel.pos, pSize = panel.size;
     return function (_a) {
-        var id = _a.id, _b = _a.pos, x = _b[0], y = _b[1], size = _a.size;
+        var id = _a.id, _b = _a.pos, x = _b[0], y = _b[1];
         if (id === panelId) {
             return false;
         }
         var px = pos[0], py = pos[1];
-        var _c = asRect(size), w = _c[0], h = _c[1];
-        var _d = asRect(panelSize), pw = _d[0], ph = _d[1];
-        return x + w >= px && x <= px + pw && y + h >= py && y <= py + ph;
+        var _c = asRect(pSize), pw = _c[0], ph = _c[1];
+        return (x > px - gridSize &&
+            x < px + pw &&
+            y > py - gridSize &&
+            y < py + ph);
     };
 }
 function componentsInGroup(_a) {
@@ -109,7 +111,7 @@ function DOM_onscroll(_a) {
         var canvas = graphics.canvas, scale = graphics.scale, pan = graphics.pan;
         var newScale = scale + (deltaY > 0 ? -1 : 1) * 0.2;
         newScale = Math.max(0.5, newScale);
-        newScale = Math.min(3, newScale);
+        newScale = Math.min(4, newScale);
         var oldWidth = canvas.width / scale;
         var oldHeight = canvas.height / scale;
         var newWidth = canvas.width / newScale;
@@ -133,7 +135,7 @@ function DOM_onmousedown(ctx) {
                 var w = size[0], h = size[1];
                 return px >= x && px <= x + w && py >= y && py <= y + h;
             }
-            return sqrt(Math.pow((px - x - halfGrid), 2) + Math.pow((py - y - halfGrid), 2)) < size;
+            return (sqrt(Math.pow((px - x - halfGrid), 2) + Math.pow((py - y - halfGrid), 2)) < size / 2);
         });
         var component = components.find(function (c) { return c.type !== "panel"; }) || components[0];
         if (component) {
@@ -171,7 +173,7 @@ function DOM_onmousedown(ctx) {
                 ctx.drag = { id: component.id, offset: offset };
                 if (component.type === "panel") {
                     component.group = ctx.components
-                        .filter(touchingPanel(component))
+                        .filter(touchingPanel(component, gridSize))
                         .map(function (c) { return [c, calcOffset_1(c.pos)]; });
                 }
                 else {
@@ -317,13 +319,13 @@ function DOM_onkeydown(ctx) {
                 pos: [x, y],
                 size: isPanel
                     ? [graphics.gridSize * 10, graphics.gridSize * 5]
-                    : graphics.gridSize / 2,
+                    : graphics.gridSize,
                 type: newComponentType,
                 text: typeToSymbol[newComponentType],
                 incoming: []
             };
             if (newComponentType === "or" || newComponentType === "not") {
-                newComponent.size = graphics.gridSize / 4;
+                newComponent.size = graphics.gridSize / 2;
             }
             snapToGrid(newComponent);
             components.push(newComponent);
@@ -350,6 +352,7 @@ function saveComponents(components) {
     }, [Infinity, Infinity]);
     isolatedComponents.forEach(function (c) {
         c.pos = [c.pos[0] - topLeftMost[0], c.pos[1] - topLeftMost[1]];
+        c.group = undefined;
     });
     //Save as JSON
     var json = JSON.stringify(isolatedComponents, null, 2);
@@ -418,22 +421,6 @@ function tick(ctx) {
         gtx.beginPath();
         gtx.arc(0, 0, 4, 0, 2 * Math.PI);
         gtx.fill();
-        //Draw connections
-        gtx.lineWidth = 2;
-        components.forEach(function (_a) {
-            var _b = _a.pos, x2 = _b[0], y2 = _b[1], incoming = _a.incoming;
-            incoming.forEach(function (_a) {
-                var _b = _a.pos, x1 = _b[0], y1 = _b[1], live = _a.live;
-                gtx.strokeStyle = gtx.createLinearGradient(x1, y1, x2, y2);
-                var colour = live ? "#00f" : "#f00";
-                gtx.strokeStyle.addColorStop(0, colour);
-                gtx.strokeStyle.addColorStop(1, "#eee");
-                gtx.beginPath();
-                gtx.moveTo(x1 + gridHalf, y1 + gridHalf);
-                gtx.lineTo(x2 + gridHalf, y2 + gridHalf);
-                gtx.stroke();
-            });
-        });
         //Draw potential connection
         if (ctx.connectingFrom !== undefined) {
             var componentFrom = findById(ctx, ctx.connectingFrom);
@@ -462,13 +449,32 @@ function tick(ctx) {
                 x += gridHalf;
                 y += gridHalf;
                 gtx.beginPath();
-                gtx.arc(x, y, size, 0, 2 * Math.PI);
+                gtx.arc(x, y, size / 2, 0, 2 * Math.PI);
                 gtx.fill();
             }
             gtx.fillStyle = live ? "#fff" : "#000";
             gtx.fillText(text, x, y + 1);
         };
         panels.forEach(drawComponent);
+        //Draw connections on top of panels
+        gtx.lineWidth = 2;
+        components.forEach(function (_a) {
+            var _b = _a.pos, x2 = _b[0], y2 = _b[1], incoming = _a.incoming;
+            incoming.forEach(function (_a) {
+                var _b = _a.pos, x1 = _b[0], y1 = _b[1], live = _a.live, size = _a.size;
+                var a = -Math.atan2(y2 - y1, x2 - x1);
+                gtx.fillStyle = live ? "#00f" : "#f00";
+                var r = (Array.isArray(size) ? size[0] : size) / 8;
+                gtx.translate(gridHalf, gridHalf);
+                gtx.beginPath();
+                gtx.moveTo(x1 + sin(a) * r, y1 + cos(a) * r);
+                gtx.lineTo(x1 - sin(a) * r, y1 - cos(a) * r);
+                gtx.lineTo(x2, y2);
+                gtx.fill();
+                gtx.translate(-gridHalf, -gridHalf);
+            });
+        });
+        //Draw all other components on top of connections
         other.forEach(drawComponent);
     };
 }
@@ -488,7 +494,7 @@ function calculateCharge(component) {
         case "and":
             return any && all;
         case "not":
-            return !any;
+            return incoming.length && !any;
         case "xor":
             return live === 1;
         case "rand":

@@ -52,7 +52,7 @@ const keyToType: Record<string, Component["type"]> = {
   ...{ s: "on", i: "indicator", p: "panel", r: "rand" },
 };
 
-const { abs, sqrt, round } = Math;
+const { abs, sqrt, sin, cos, round } = Math;
 
 function findById(ctx: Ctx, id: number) {
   return ctx.components.find(c => c.id === id);
@@ -76,15 +76,20 @@ function asRect(x: v2d | number): v2d {
   return Array.isArray(x) ? x : [x, x];
 }
 
-function touchingPanel({ id: panelId, pos, size: panelSize }: Component) {
-  return ({ id, pos: [x, y], size }: Component) => {
+function touchingPanel(panel: Component, gridSize: number) {
+  const { id: panelId, pos, size: pSize } = panel;
+  return ({ id, pos: [x, y] }: Component) => {
     if (id === panelId) {
       return false;
     }
     const [px, py] = pos;
-    const [w, h] = asRect(size);
-    const [pw, ph] = asRect(panelSize);
-    return x + w >= px && x <= px + pw && y + h >= py && y <= py + ph;
+    const [pw, ph] = asRect(pSize);
+    return (
+      x > px - gridSize &&
+      x < px + pw &&
+      y > py - gridSize &&
+      y < py + ph
+    );
   };
 }
 
@@ -131,7 +136,7 @@ function DOM_onscroll({ graphics }: Ctx) {
     const { canvas, scale, pan } = graphics;
     let newScale = scale + (deltaY > 0 ? -1 : 1) * 0.2;
     newScale = Math.max(0.5, newScale);
-    newScale = Math.min(3, newScale);
+    newScale = Math.min(4, newScale);
     const oldWidth = canvas.width / scale;
     const oldHeight = canvas.height / scale;
     const newWidth = canvas.width / newScale;
@@ -158,7 +163,9 @@ function DOM_onmousedown(ctx: Ctx) {
         const [w, h] = size;
         return px >= x && px <= x + w && py >= y && py <= y + h;
       }
-      return sqrt((px - x - halfGrid) ** 2 + (py - y - halfGrid) ** 2) < size;
+      return (
+        sqrt((px - x - halfGrid) ** 2 + (py - y - halfGrid) ** 2) < size / 2
+      );
     });
     const component = components.find(c => c.type !== "panel") || components[0];
     if (component) {
@@ -192,7 +199,7 @@ function DOM_onmousedown(ctx: Ctx) {
         ctx.drag = { id: component.id, offset };
         if (component.type === "panel") {
           component.group = ctx.components
-            .filter(touchingPanel(component))
+            .filter(touchingPanel(component, gridSize))
             .map(c => [c, calcOffset(c.pos)]);
         } else {
           component.group = undefined;
@@ -335,13 +342,13 @@ function DOM_onkeydown(ctx: Ctx) {
         pos: [x, y],
         size: isPanel
           ? [graphics.gridSize * 10, graphics.gridSize * 5]
-          : graphics.gridSize / 2,
+          : graphics.gridSize,
         type: newComponentType,
         text: typeToSymbol[newComponentType],
         incoming: [],
       };
       if (newComponentType === "or" || newComponentType === "not") {
-        newComponent.size = graphics.gridSize / 4;
+        newComponent.size = graphics.gridSize / 2;
       }
       snapToGrid(newComponent);
       components.push(newComponent);
@@ -374,6 +381,7 @@ function saveComponents(components: Component[]) {
   );
   isolatedComponents.forEach(c => {
     c.pos = [c.pos[0] - topLeftMost[0]!, c.pos[1] - topLeftMost[1]!];
+    c.group = undefined;
   });
   //Save as JSON
   const json = JSON.stringify(isolatedComponents, null, 2);
@@ -453,20 +461,6 @@ function tick(ctx: Ctx) {
     gtx.beginPath();
     gtx.arc(0, 0, 4, 0, 2 * Math.PI);
     gtx.fill();
-    //Draw connections
-    gtx.lineWidth = 2;
-    components.forEach(({ pos: [x2, y2], incoming }) => {
-      incoming.forEach(({ pos: [x1, y1], live }) => {
-        gtx.strokeStyle = gtx.createLinearGradient(x1, y1, x2, y2);
-        const colour = live ? "#00f" : "#f00";
-        gtx.strokeStyle.addColorStop(0, colour);
-        gtx.strokeStyle.addColorStop(1, "#eee");
-        gtx.beginPath();
-        gtx.moveTo(x1 + gridHalf, y1 + gridHalf);
-        gtx.lineTo(x2 + gridHalf, y2 + gridHalf);
-        gtx.stroke();
-      });
-    });
     //Draw potential connection
     if (ctx.connectingFrom !== undefined) {
       const componentFrom = findById(ctx, ctx.connectingFrom);
@@ -494,13 +488,30 @@ function tick(ctx: Ctx) {
         x += gridHalf;
         y += gridHalf;
         gtx.beginPath();
-        gtx.arc(x, y, size, 0, 2 * Math.PI);
+        gtx.arc(x, y, size / 2, 0, 2 * Math.PI);
         gtx.fill();
       }
       gtx.fillStyle = live ? "#fff" : "#000";
       gtx.fillText(text, x, y + 1);
     };
     panels.forEach(drawComponent);
+    //Draw connections on top of panels
+    gtx.lineWidth = 2;
+    components.forEach(({ pos: [x2, y2], incoming }) => {
+      incoming.forEach(({ pos: [x1, y1], live, size }) => {
+        const a = -Math.atan2(y2 - y1, x2 - x1);
+        gtx.fillStyle = live ? "#00f" : "#f00";
+        const r = (Array.isArray(size) ? size[0]: size) / 8;
+        gtx.translate(gridHalf, gridHalf);
+        gtx.beginPath();
+        gtx.moveTo(x1 + sin(a) * r, y1 + cos(a) * r);
+        gtx.lineTo(x1 - sin(a) * r, y1 - cos(a) * r);
+        gtx.lineTo(x2, y2);
+        gtx.fill();
+        gtx.translate(-gridHalf, -gridHalf);
+      });
+    });
+    //Draw all other components on top of connections
     other.forEach(drawComponent);
   };
 }
@@ -521,7 +532,7 @@ function calculateCharge(component: Component) {
     case "and":
       return any && all;
     case "not":
-      return !any;
+      return incoming.length && !any;
     case "xor":
       return live === 1;
     case "rand":
