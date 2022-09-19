@@ -1,14 +1,18 @@
-type Point = [number, number];
+type v2d = [number, number];
+
+type Gates = "and" | "or" | "not" | "xor";
 
 type Component = {
   id: number;
-  pos: Point;
-  size: Point | number;
-  type: "and" | "or" | "not" | "xor" | "on" | "off" | "indicator" | "panel";
-  text: "&" | "•" | "~" | "⊕" | "⭘" | "⏻" | "";
+  pos: v2d;
+  size: v2d | number;
+  type: Gates | "on" | "off" | "indicator" | "panel" | "rand";
+  text: "&" | "•" | "~" | "⊕" | "⭘" | "⏻" | "⚂" | "";
   incoming: Component[];
+  incomingIds?: number[];
   charged?: true;
   live?: true;
+  group?: [Component, v2d][];
 };
 
 type Ctx = {
@@ -17,85 +21,92 @@ type Ctx = {
     gtx: CanvasRenderingContext2D;
     gridSize: number;
     scale: number;
-    pan: Point;
+    pan: v2d;
   };
   components: Component[];
   drag?: {
     id: Component["id"];
-    offset: Point;
+    offset: v2d;
   };
-  pan?: Point;
-  mouse: Point;
+  pan?: v2d;
+  mouse: v2d;
   mouseMoved: boolean;
   connectingFrom?: number;
   snapToGrid: (c: Component) => void;
 };
 
 const typeToSymbol: Record<Component["type"], Component["text"]> = {
-  and: "&",
-  or: "•",
-  not: "~",
-  xor: "⊕",
-  on: "⭘",
-  off: "⏻",
-  indicator: "",
-  panel: "",
+  ...{ and: "&", or: "•", not: "~", xor: "⊕" },
+  ...{ on: "⭘", off: "⏻", indicator: "", panel: "", rand: "⚂" },
 };
-const typeToColour: Record<Component["type"], string> = {
-  and: "#fa0",
-  or: "#0af",
-  not: "#f00",
-  xor: "#0fa",
-  on: "#44f",
-  off: "#f44",
-  indicator: "#000",
-  panel: "#aaa",
-};
+function componentColour({ type, live }: Pick<Component, "type" | "live">) {
+  const types = ["and", "or", "not", "xor", "on", "off", "rand", "panel"];
+  const colours = [
+    ...["#fa0", "#0af", "#f00", "#0fa", "#44f", "#f44", "#4f4"],
+    "rgba(200, 200, 200, .5)",
+  ];
+  return colours[types.indexOf(type)] || (live ? "#0f0" : "#000");
+}
 const keyToType: Record<string, Component["type"]> = {
-  a: "and",
-  o: "or",
-  n: "not",
-  x: "xor",
-  s: "on",
-  i: "indicator",
-  p: "panel",
+  ...{ a: "and", o: "or", n: "not", x: "xor" },
+  ...{ s: "on", i: "indicator", p: "panel", r: "rand" },
 };
 
 const { abs, sqrt, round } = Math;
+
+function findById(ctx: Ctx, id: number) {
+  return ctx.components.find(c => c.id === id);
+}
+
+function mouseInCtx(ctx: Ctx, x = ctx.mouse[0], y = ctx.mouse[1]): v2d {
+  const { scale, pan } = ctx.graphics;
+  return [x / scale - pan[0], y / scale - pan[1]];
+}
+
+function isPointNearLine(p1: v2d, p2: v2d, p: v2d, dist = 1): boolean {
+  const [px, py] = [p2[0] - p1[0], p2[1] - p1[1]];
+  const u = ((p[0] - p1[0]) * px + (p[1] - p1[1]) * py) / (px * px + py * py);
+  const u2 = u > 1 ? 1 : u < 0 ? 0 : u;
+  const [x, y] = [p1[0] + u2 * px, p1[1] + u2 * py];
+  const [dx, dy] = [x - p[0], y - p[1]];
+  return sqrt(dx * dx + dy * dy) < dist;
+}
+
+function asRect(x: v2d | number): v2d {
+  return Array.isArray(x) ? x : [x, x];
+}
+
+function touchingPanel({ id: panelId, pos, size: panelSize }: Component) {
+  return ({ id, pos: [x, y], size }: Component) => {
+    if (id === panelId) {
+      return false;
+    }
+    const [px, py] = pos;
+    const [w, h] = asRect(size);
+    const [pw, ph] = asRect(panelSize);
+    return x + w >= px && x <= px + pw && y + h >= py && y <= py + ph;
+  };
+}
+
+function componentsInGroup({ group }: Component) {
+  return group?.map(([c]) => c) ?? [];
+}
+
+function sub(a: v2d, b: v2d): v2d {
+  return [a[0] - b[0], a[1] - b[1]];
+}
+
+function add(v: v2d, n: number): v2d {
+  return [v[0] + n, v[1] + n];
+}
 
 function DOM_onload() {
   const canvas = document.querySelector("canvas")!;
   const gtx = canvas.getContext("2d")!;
   const gridSize = 32;
-
-  const demoSwitch: Component = {
-    id: 0,
-    pos: [64, 64],
-    size: gridSize / 2,
-    type: "on",
-    text: "⭘",
-    incoming: [],
-    live: true,
-  };
-
-  const demoOr: Component = {
-    id: 1,
-    pos: [128, 64],
-    size: gridSize / 2,
-    type: "xor",
-    text: "⊕",
-    incoming: [demoSwitch],
-  };
-
   const ctx: Ctx = {
-    graphics: {
-      canvas,
-      gtx,
-      gridSize,
-      scale: 1,
-      pan: [0, 0],
-    },
-    components: [demoSwitch, demoOr],
+    graphics: { canvas, gtx, gridSize, scale: 1, pan: [0, 0] },
+    components: [],
     mouse: [0, 0],
     mouseMoved: false,
     snapToGrid: c => {
@@ -112,24 +123,6 @@ function DOM_onload() {
   html.addEventListener("mouseup", DOM_onmouseup(ctx));
   html.addEventListener("keydown", DOM_onkeydown(ctx));
   canvas.addEventListener("contextmenu", e => e.preventDefault());
-}
-
-function findById(ctx: Ctx, id: number) {
-  return ctx.components.find(c => c.id === id);
-}
-
-function mouseInCtx(ctx: Ctx, x = ctx.mouse[0], y = ctx.mouse[1]): Point {
-  const { scale, pan } = ctx.graphics;
-  return [x / scale - pan[0], y / scale - pan[1]];
-}
-
-function isPointNearLine(p1: Point, p2: Point, p: Point, dist = 1): boolean {
-  const [px, py] = [p2[0] - p1[0], p2[1] - p1[1]];
-  const u = ((p[0] - p1[0]) * px + (p[1] - p1[1]) * py) / (px * px + py * py);
-  const u2 = u > 1 ? 1 : u < 0 ? 0 : u;
-  const [x, y] = [p1[0] + u2 * px, p1[1] + u2 * py];
-  const [dx, dy] = [x - p[0], y - p[1]];
-  return sqrt(dx * dx + dy * dy) < dist;
 }
 
 function DOM_onscroll({ graphics }: Ctx) {
@@ -158,16 +151,16 @@ function DOM_onmousedown(ctx: Ctx) {
       scale,
       gridSize,
     } = ctx.graphics;
-    const component = ctx.components.find(({ pos: [x, y], size }) => {
+    const components = ctx.components.filter(({ pos: [x, y], size }) => {
       const [px, py] = mouseInCtx(ctx, e.clientX, e.clientY);
       const halfGrid = gridSize / 2;
       if (Array.isArray(size)) {
         const [w, h] = size;
-        const [cx, cy] = [x + halfGrid - w / 2, y + halfGrid - h / 2];
-        return px >= cx && px <= cx + w && py >= cy && py <= cy + h;
+        return px >= x && px <= x + w && py >= y && py <= y + h;
       }
       return sqrt((px - x - halfGrid) ** 2 + (py - y - halfGrid) ** 2) < size;
     });
+    const component = components.find(c => c.type !== "panel") || components[0];
     if (component) {
       //Interact with component
       if (e.button === 2) {
@@ -177,14 +170,33 @@ function DOM_onmousedown(ctx: Ctx) {
         } else if (component.type === "off") {
           component.type = "on";
           component.text = "⭘";
+        } else if (
+          component.type === "panel" &&
+          Array.isArray(component.size)
+        ) {
+          component.size[0] /= gridSize;
+          component.size[1] /= gridSize;
+          const prompted = prompt("Panel size", component.size.toString());
+          const [w, h] = prompted?.split(/, ?/).map(Number) ?? [0, 0];
+          component.size = [w || component.size[0], h || component.size[1]];
+          component.size[0] *= gridSize;
+          component.size[1] *= gridSize;
         }
         //Drag component
       } else {
-        const offset: Point = [
-          (e.clientX - panX - component.pos[0] * scale) / scale,
-          (e.clientY - panY - component.pos[1] * scale) / scale,
+        const calcOffset = ([x, y]: v2d): v2d => [
+          (e.clientX - panX - x * scale) / scale,
+          (e.clientY - panY - y * scale) / scale,
         ];
+        const offset: v2d = calcOffset(component.pos);
         ctx.drag = { id: component.id, offset };
+        if (component.type === "panel") {
+          component.group = ctx.components
+            .filter(touchingPanel(component))
+            .map(c => [c, calcOffset(c.pos)]);
+        } else {
+          component.group = undefined;
+        }
       }
     } else {
       ctx.pan = [panX - e.clientX / scale, panY - e.clientY / scale];
@@ -204,10 +216,14 @@ function DOM_mousemove(ctx: Ctx) {
     if (drag) {
       const component = findById(ctx, drag.id);
       if (component) {
-        component.pos = [
-          (e.clientX - panX - drag.offset[0] * scale) / scale,
-          (e.clientY - panY - drag.offset[1] * scale) / scale,
-        ];
+        const drags: [Component, v2d][] = [[component, drag.offset]];
+        drags.push(...(component.group ?? []));
+        drags.forEach(([component, offset]) => {
+          component.pos = [
+            (e.clientX - panX - offset[0] * scale) / scale,
+            (e.clientY - panY - offset[1] * scale) / scale,
+          ];
+        });
       }
     } else if (pan) {
       let [x, y] = pan;
@@ -217,50 +233,63 @@ function DOM_mousemove(ctx: Ctx) {
   };
 }
 
+function componentClick(e: MouseEvent, ctx: Ctx, component: Component) {
+  const isPanel = component.type === "panel";
+  //We clicked a component
+  if (e.shiftKey) {
+    //Delete the component
+    const toDelete = [component];
+    if (e.ctrlKey) {
+      toDelete.push(...componentsInGroup(component));
+    }
+    toDelete.forEach(c => ctx.components.splice(ctx.components.indexOf(c), 1));
+    const deletedIds = toDelete.map(c => c.id);
+    ctx.components.forEach(c => {
+      c.incoming = c.incoming.filter(i => !deletedIds.includes(i.id));
+    });
+  } else if (isPanel && e.ctrlKey) {
+    //Save the panel
+    saveComponents([component, ...componentsInGroup(component)]);
+  } else if (ctx.connectingFrom !== undefined && component) {
+    //Finish a wire
+    const componentFrom = findById(ctx, ctx.connectingFrom);
+    if (componentFrom) {
+      component.incoming.push(componentFrom);
+    }
+    ctx.connectingFrom = undefined;
+  } else if (!isPanel) {
+    //Start a wire
+    ctx.connectingFrom = component.id;
+  }
+  ctx.drag = undefined;
+  return { handled: !isPanel };
+}
+
 function DOM_onmouseup(ctx: Ctx) {
   return (e: MouseEvent) => {
     const { components, drag, pan, mouseMoved, snapToGrid } = ctx;
-    //A click
     if (!mouseMoved) {
-      //We clicked a component
+      //Handle a click
       if (drag) {
-        //Delete the component
-        if (e.shiftKey) {
-          const component = findById(ctx, drag.id);
-          if (component) {
-            const index = components.indexOf(component);
-            components.splice(index, 1);
-            components.forEach(c => {
-              c.incoming = c.incoming.filter(i => i.id !== drag.id);
-            });
-          }
-          //Finish a wire
-        } else if (ctx.connectingFrom !== undefined) {
-          const componentFrom = findById(ctx, ctx.connectingFrom);
-          const componentTo = findById(ctx, drag.id);
-          if (componentFrom && componentTo) {
-            componentTo.incoming.push(componentFrom);
-          }
-          ctx.connectingFrom = undefined;
-          //Start a wire
-        } else {
-          ctx.connectingFrom = drag.id;
+        const component = findById(ctx, drag.id)!;
+        if (componentClick(e, ctx, component).handled) {
+          return;
         }
-        ctx.drag = undefined;
-        return;
       }
       ctx.pan = undefined;
-      //We may have clicked a wire
-      const gridHalf = ctx.graphics.gridSize / 2;
-      for (const { pos, incoming } of components) {
-        const pos1: Point = [pos[0] + gridHalf, pos[1] + gridHalf];
-        for (let i = 0; i < incoming.length; ++i) {
-          let pos2 = incoming[i]!.pos;
-          pos2 = [pos2[0] + gridHalf, pos2[1] + gridHalf];
-          if (isPointNearLine(pos1, pos2, ctx.mouse, ctx.graphics.scale)) {
-            incoming.splice(i, 1);
-            ctx.drag = undefined;
-            return;
+      //We may have clicked a wire (and so delete it)
+      if (e.button !== 2) {
+        const gridHalf = ctx.graphics.gridSize / 2;
+        for (const { pos, incoming } of components) {
+          const pos1: v2d = [pos[0] + gridHalf, pos[1] + gridHalf];
+          for (let i = 0; i < incoming.length; ++i) {
+            let pos2 = incoming[i]!.pos;
+            pos2 = [pos2[0] + gridHalf, pos2[1] + gridHalf];
+            if (isPointNearLine(pos1, pos2, ctx.mouse, ctx.graphics.scale)) {
+              incoming.splice(i, 1);
+              ctx.drag = undefined;
+              return;
+            }
           }
         }
       }
@@ -271,6 +300,7 @@ function DOM_onmouseup(ctx: Ctx) {
       const component = findById(ctx, drag.id);
       if (component) {
         snapToGrid(component);
+        componentsInGroup(component).forEach(snapToGrid);
       }
       ctx.drag = undefined;
     } else if (pan) {
@@ -281,8 +311,6 @@ function DOM_onmouseup(ctx: Ctx) {
 
 function DOM_onkeydown(ctx: Ctx) {
   return (e: KeyboardEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
     if (e.ctrlKey) {
       if (e.key === "s") {
         saveComponents(ctx.components);
@@ -290,27 +318,29 @@ function DOM_onkeydown(ctx: Ctx) {
       if (e.key === "o") {
         loadComponents(ctx);
       }
+      e.preventDefault();
+      e.stopPropagation();
       return;
     }
     const { graphics, components, snapToGrid } = ctx;
-    const [x, y] = [
-      ctx.mouse[0] - graphics.gridSize / 2,
-      ctx.mouse[1] - graphics.gridSize / 2,
-    ];
     const newComponentType = keyToType[e.key];
+    const isPanel = newComponentType === "panel";
+    const gridHalf = graphics.gridSize / 2;
+    const [x, y] = isPanel
+      ? ctx.mouse
+      : [ctx.mouse[0] - gridHalf, ctx.mouse[1] - gridHalf];
     if (newComponentType) {
       const newComponent: Component = {
         id: Math.random(),
         pos: [x, y],
-        size:
-          newComponentType === "panel"
-            ? [graphics.gridSize, graphics.gridSize]
-            : graphics.gridSize / 2,
+        size: isPanel
+          ? [graphics.gridSize * 10, graphics.gridSize * 5]
+          : graphics.gridSize / 2,
         type: newComponentType,
         text: typeToSymbol[newComponentType],
         incoming: [],
       };
-      if (newComponentType === "or") {
+      if (newComponentType === "or" || newComponentType === "not") {
         newComponent.size = graphics.gridSize / 4;
       }
       snapToGrid(newComponent);
@@ -320,6 +350,10 @@ function DOM_onkeydown(ctx: Ctx) {
 }
 
 function saveComponents(components: Component[]) {
+  const fileName = prompt("File name", "components");
+  if (!fileName) {
+    return;
+  }
   //Isolate component wires to only included components
   const includedIds = components.map(c => c.id);
   const isolatedComponents = components.map(c => ({
@@ -335,7 +369,7 @@ function saveComponents(components: Component[]) {
   //Normalise positions
   const topLeftMost = isolatedComponents.reduce(
     (acc, c) =>
-      [Math.min(acc[0]!, c.pos[0]), Math.min(acc[1]!, c.pos[1])] as Point,
+      [Math.min(acc[0]!, c.pos[0]), Math.min(acc[1]!, c.pos[1])] as v2d,
     [Infinity, Infinity]
   );
   isolatedComponents.forEach(c => {
@@ -346,7 +380,7 @@ function saveComponents(components: Component[]) {
   const blob = new Blob([json], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = "components.json";
+  a.download = `${fileName}.json`;
   a.click();
 }
 
@@ -368,9 +402,16 @@ function loadComponents(ctx: Ctx) {
       savedComponents.forEach(savedComponent => {
         const component: Component = {
           ...savedComponent,
-          incoming: savedComponent.incoming.map(id => findById(ctx, id)!),
+          incoming: [],
+          incomingIds: savedComponent.incoming,
         };
         ctx.components.push(component);
+      });
+      ctx.components.forEach(component => {
+        component.incoming.push(
+          ...(component.incomingIds?.map(id => findById(ctx, id)!) ?? [])
+        );
+        delete component.incomingIds;
       });
     };
     reader.readAsText(file);
@@ -432,10 +473,7 @@ function tick(ctx: Ctx) {
       if (componentFrom) {
         gtx.strokeStyle = "#000";
         gtx.beginPath();
-        gtx.moveTo(
-          componentFrom.pos[0] + gridHalf,
-          componentFrom.pos[1] + gridHalf
-        );
+        gtx.moveTo(...add(componentFrom.pos, gridHalf));
         gtx.lineTo(ctx.mouse[0], ctx.mouse[1]);
         gtx.stroke();
       }
@@ -444,8 +482,12 @@ function tick(ctx: Ctx) {
     gtx.font = "24px Symbola";
     gtx.textAlign = "center";
     gtx.textBaseline = "middle";
-    components.forEach(({ pos: [x, y], size, text: symbol, type, live }) => {
-      gtx.fillStyle = typeToColour[type];
+    const panels = components.filter(c => c.type === "panel");
+    const other = components.filter(c => c.type !== "panel");
+    const drawComponent = (component: Component) => {
+      const { size, text, type, live } = component;
+      let [x, y] = component.pos;
+      gtx.fillStyle = componentColour({ type, live });
       if (Array.isArray(size)) {
         gtx.fillRect(x, y, ...size);
       } else {
@@ -456,32 +498,34 @@ function tick(ctx: Ctx) {
         gtx.fill();
       }
       gtx.fillStyle = live ? "#fff" : "#000";
-      gtx.fillText(symbol, x, y + 1);
-    });
+      gtx.fillText(text, x, y + 1);
+    };
+    panels.forEach(drawComponent);
+    other.forEach(drawComponent);
   };
 }
 
-function calculateCharge(component: Component): true | undefined {
+function calculateCharge(component: Component) {
   const { type, incoming } = component;
-  if (type === "on") {
-    return true;
-  } else if (type === "off") {
-    return undefined;
-  } else if (type === "or") {
-    return incoming.some(({ live }) => live) || undefined;
-  } else if (type === "and") {
-    return (incoming.length && incoming.every(({ live }) => live)) || undefined;
-  } else if (type === "not") {
-    return (incoming.length && !incoming.some(({ live }) => live)) || undefined;
-  } else if (type === "xor") {
-    let l = 0;
-    for (let i = 0; i < incoming.length; i++) {
-      l += Number(incoming[i]!.live);
-      if (l > 1) {
-        return undefined;
-      }
-    }
-    return l === 1 || undefined;
+  const live = incoming.filter(c => c.live).length;
+  const any = live > 0;
+  const all = incoming.length === live;
+  switch (type) {
+    case "on":
+      return true;
+    case "off":
+      return false;
+    case "or":
+    case "indicator":
+      return any;
+    case "and":
+      return any && all;
+    case "not":
+      return !any;
+    case "xor":
+      return live === 1;
+    case "rand":
+      return Math.random() < 0.5;
   }
 }
 
@@ -489,7 +533,7 @@ function tock({ components }: Ctx) {
   return () => {
     //Effect delayed electification
     components.forEach(component => {
-      if (component.charged) {
+      if (component.charged && component.type !== "off") {
         component.live = true;
         component.charged = undefined;
       } else {
@@ -498,7 +542,7 @@ function tock({ components }: Ctx) {
     });
     //Calculate delayed electification
     components.forEach(component => {
-      component.charged = calculateCharge(component);
+      component.charged = calculateCharge(component) || undefined;
     });
   };
 }

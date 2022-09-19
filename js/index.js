@@ -19,83 +19,17 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
     }
     return to.concat(ar || Array.prototype.slice.call(from));
 };
-var typeToSymbol = {
-    and: "&",
-    or: "•",
-    not: "~",
-    xor: "⊕",
-    on: "⭘",
-    off: "⏻",
-    indicator: "",
-    panel: ""
-};
-var typeToColour = {
-    and: "#fa0",
-    or: "#0af",
-    not: "#f00",
-    xor: "#0fa",
-    on: "#44f",
-    off: "#f44",
-    indicator: "#000",
-    panel: "#aaa"
-};
-var keyToType = {
-    a: "and",
-    o: "or",
-    n: "not",
-    x: "xor",
-    s: "on",
-    i: "indicator",
-    p: "panel"
-};
-var abs = Math.abs, sqrt = Math.sqrt, round = Math.round;
-function DOM_onload() {
-    var canvas = document.querySelector("canvas");
-    var gtx = canvas.getContext("2d");
-    var gridSize = 32;
-    var demoSwitch = {
-        id: 0,
-        pos: [64, 64],
-        size: gridSize / 2,
-        type: "on",
-        text: "⭘",
-        incoming: [],
-        live: true
-    };
-    var demoOr = {
-        id: 1,
-        pos: [128, 64],
-        size: gridSize / 2,
-        type: "xor",
-        text: "⊕",
-        incoming: [demoSwitch]
-    };
-    var ctx = {
-        graphics: {
-            canvas: canvas,
-            gtx: gtx,
-            gridSize: gridSize,
-            scale: 1,
-            pan: [0, 0]
-        },
-        components: [demoSwitch, demoOr],
-        mouse: [0, 0],
-        mouseMoved: false,
-        snapToGrid: function (c) {
-            var s = gridSize / 2;
-            c.pos = [round(c.pos[0] / s) * s, round(c.pos[1] / s) * s];
-        }
-    };
-    setInterval(tick(ctx), 1000 / 20);
-    setInterval(tock(ctx), 1000 / 4);
-    var html = document.querySelector("html");
-    html.addEventListener("wheel", DOM_onscroll(ctx));
-    html.addEventListener("mousedown", DOM_onmousedown(ctx));
-    html.addEventListener("mousemove", DOM_mousemove(ctx));
-    html.addEventListener("mouseup", DOM_onmouseup(ctx));
-    html.addEventListener("keydown", DOM_onkeydown(ctx));
-    canvas.addEventListener("contextmenu", function (e) { return e.preventDefault(); });
+var typeToSymbol = __assign({ and: "&", or: "•", not: "~", xor: "⊕" }, { on: "⭘", off: "⏻", indicator: "", panel: "", rand: "⚂" });
+function componentColour(_a) {
+    var type = _a.type, live = _a.live;
+    var types = ["and", "or", "not", "xor", "on", "off", "rand", "panel"];
+    var colours = __spreadArray(__spreadArray([], ["#fa0", "#0af", "#f00", "#0fa", "#44f", "#f44", "#4f4"], false), [
+        "rgba(200, 200, 200, .5)",
+    ], false);
+    return colours[types.indexOf(type)] || (live ? "#0f0" : "#000");
 }
+var keyToType = __assign({ a: "and", o: "or", n: "not", x: "xor" }, { s: "on", i: "indicator", p: "panel", r: "rand" });
+var abs = Math.abs, sqrt = Math.sqrt, round = Math.round;
 function findById(ctx, id) {
     return ctx.components.find(function (c) { return c.id === id; });
 }
@@ -113,6 +47,60 @@ function isPointNearLine(p1, p2, p, dist) {
     var _b = [p1[0] + u2 * px, p1[1] + u2 * py], x = _b[0], y = _b[1];
     var _c = [x - p[0], y - p[1]], dx = _c[0], dy = _c[1];
     return sqrt(dx * dx + dy * dy) < dist;
+}
+function asRect(x) {
+    return Array.isArray(x) ? x : [x, x];
+}
+function touchingPanel(_a) {
+    var panelId = _a.id, pos = _a.pos, panelSize = _a.size;
+    return function (_a) {
+        var id = _a.id, _b = _a.pos, x = _b[0], y = _b[1], size = _a.size;
+        if (id === panelId) {
+            return false;
+        }
+        var px = pos[0], py = pos[1];
+        var _c = asRect(size), w = _c[0], h = _c[1];
+        var _d = asRect(panelSize), pw = _d[0], ph = _d[1];
+        return x + w >= px && x <= px + pw && y + h >= py && y <= py + ph;
+    };
+}
+function componentsInGroup(_a) {
+    var _b;
+    var group = _a.group;
+    return (_b = group === null || group === void 0 ? void 0 : group.map(function (_a) {
+        var c = _a[0];
+        return c;
+    })) !== null && _b !== void 0 ? _b : [];
+}
+function sub(a, b) {
+    return [a[0] - b[0], a[1] - b[1]];
+}
+function add(v, n) {
+    return [v[0] + n, v[1] + n];
+}
+function DOM_onload() {
+    var canvas = document.querySelector("canvas");
+    var gtx = canvas.getContext("2d");
+    var gridSize = 32;
+    var ctx = {
+        graphics: { canvas: canvas, gtx: gtx, gridSize: gridSize, scale: 1, pan: [0, 0] },
+        components: [],
+        mouse: [0, 0],
+        mouseMoved: false,
+        snapToGrid: function (c) {
+            var s = gridSize / 2;
+            c.pos = [round(c.pos[0] / s) * s, round(c.pos[1] / s) * s];
+        }
+    };
+    setInterval(tick(ctx), 1000 / 20);
+    setInterval(tock(ctx), 1000 / 4);
+    var html = document.querySelector("html");
+    html.addEventListener("wheel", DOM_onscroll(ctx));
+    html.addEventListener("mousedown", DOM_onmousedown(ctx));
+    html.addEventListener("mousemove", DOM_mousemove(ctx));
+    html.addEventListener("mouseup", DOM_onmouseup(ctx));
+    html.addEventListener("keydown", DOM_onkeydown(ctx));
+    canvas.addEventListener("contextmenu", function (e) { return e.preventDefault(); });
 }
 function DOM_onscroll(_a) {
     var graphics = _a.graphics;
@@ -134,19 +122,20 @@ function DOM_onscroll(_a) {
 }
 function DOM_onmousedown(ctx) {
     return function (e) {
+        var _a;
         e.preventDefault();
-        var _a = ctx.graphics, _b = _a.pan, panX = _b[0], panY = _b[1], scale = _a.scale, gridSize = _a.gridSize;
-        var component = ctx.components.find(function (_a) {
+        var _b = ctx.graphics, _c = _b.pan, panX = _c[0], panY = _c[1], scale = _b.scale, gridSize = _b.gridSize;
+        var components = ctx.components.filter(function (_a) {
             var _b = _a.pos, x = _b[0], y = _b[1], size = _a.size;
             var _c = mouseInCtx(ctx, e.clientX, e.clientY), px = _c[0], py = _c[1];
             var halfGrid = gridSize / 2;
             if (Array.isArray(size)) {
                 var w = size[0], h = size[1];
-                var _d = [x + halfGrid - w / 2, y + halfGrid - h / 2], cx = _d[0], cy = _d[1];
-                return px >= cx && px <= cx + w && py >= cy && py <= cy + h;
+                return px >= x && px <= x + w && py >= y && py <= y + h;
             }
             return sqrt(Math.pow((px - x - halfGrid), 2) + Math.pow((py - y - halfGrid), 2)) < size;
         });
+        var component = components.find(function (c) { return c.type !== "panel"; }) || components[0];
         if (component) {
             //Interact with component
             if (e.button === 2) {
@@ -158,14 +147,36 @@ function DOM_onmousedown(ctx) {
                     component.type = "on";
                     component.text = "⭘";
                 }
+                else if (component.type === "panel" &&
+                    Array.isArray(component.size)) {
+                    component.size[0] /= gridSize;
+                    component.size[1] /= gridSize;
+                    var prompted = prompt("Panel size", component.size.toString());
+                    var _d = (_a = prompted === null || prompted === void 0 ? void 0 : prompted.split(/, ?/).map(Number)) !== null && _a !== void 0 ? _a : [0, 0], w = _d[0], h = _d[1];
+                    component.size = [w || component.size[0], h || component.size[1]];
+                    component.size[0] *= gridSize;
+                    component.size[1] *= gridSize;
+                }
                 //Drag component
             }
             else {
-                var offset = [
-                    (e.clientX - panX - component.pos[0] * scale) / scale,
-                    (e.clientY - panY - component.pos[1] * scale) / scale,
-                ];
+                var calcOffset_1 = function (_a) {
+                    var x = _a[0], y = _a[1];
+                    return [
+                        (e.clientX - panX - x * scale) / scale,
+                        (e.clientY - panY - y * scale) / scale,
+                    ];
+                };
+                var offset = calcOffset_1(component.pos);
                 ctx.drag = { id: component.id, offset: offset };
+                if (component.type === "panel") {
+                    component.group = ctx.components
+                        .filter(touchingPanel(component))
+                        .map(function (c) { return [c, calcOffset_1(c.pos)]; });
+                }
+                else {
+                    component.group = undefined;
+                }
             }
         }
         else {
@@ -176,16 +187,22 @@ function DOM_onmousedown(ctx) {
 }
 function DOM_mousemove(ctx) {
     return function (e) {
+        var _a;
         var drag = ctx.drag, pan = ctx.pan;
         ctx.mouse = mouseInCtx(ctx, e.clientX, e.clientY);
-        var _a = ctx.graphics, _b = _a.pan, panX = _b[0], panY = _b[1], scale = _a.scale;
+        var _b = ctx.graphics, _c = _b.pan, panX = _c[0], panY = _c[1], scale = _b.scale;
         if (drag) {
             var component = findById(ctx, drag.id);
             if (component) {
-                component.pos = [
-                    (e.clientX - panX - drag.offset[0] * scale) / scale,
-                    (e.clientY - panY - drag.offset[1] * scale) / scale,
-                ];
+                var drags = [[component, drag.offset]];
+                drags.push.apply(drags, ((_a = component.group) !== null && _a !== void 0 ? _a : []));
+                drags.forEach(function (_a) {
+                    var component = _a[0], offset = _a[1];
+                    component.pos = [
+                        (e.clientX - panX - offset[0] * scale) / scale,
+                        (e.clientY - panY - offset[1] * scale) / scale,
+                    ];
+                });
             }
         }
         else if (pan) {
@@ -195,53 +212,66 @@ function DOM_mousemove(ctx) {
         ctx.mouseMoved = true;
     };
 }
+function componentClick(e, ctx, component) {
+    var isPanel = component.type === "panel";
+    //We clicked a component
+    if (e.shiftKey) {
+        //Delete the component
+        var toDelete = [component];
+        if (e.ctrlKey) {
+            toDelete.push.apply(toDelete, componentsInGroup(component));
+        }
+        toDelete.forEach(function (c) { return ctx.components.splice(ctx.components.indexOf(c), 1); });
+        var deletedIds_1 = toDelete.map(function (c) { return c.id; });
+        ctx.components.forEach(function (c) {
+            c.incoming = c.incoming.filter(function (i) { return !deletedIds_1.includes(i.id); });
+        });
+    }
+    else if (isPanel && e.ctrlKey) {
+        //Save the panel
+        saveComponents(__spreadArray([component], componentsInGroup(component), true));
+    }
+    else if (ctx.connectingFrom !== undefined && component) {
+        //Finish a wire
+        var componentFrom = findById(ctx, ctx.connectingFrom);
+        if (componentFrom) {
+            component.incoming.push(componentFrom);
+        }
+        ctx.connectingFrom = undefined;
+    }
+    else if (!isPanel) {
+        //Start a wire
+        ctx.connectingFrom = component.id;
+    }
+    ctx.drag = undefined;
+    return { handled: !isPanel };
+}
 function DOM_onmouseup(ctx) {
     return function (e) {
         var components = ctx.components, drag = ctx.drag, pan = ctx.pan, mouseMoved = ctx.mouseMoved, snapToGrid = ctx.snapToGrid;
-        //A click
         if (!mouseMoved) {
-            //We clicked a component
+            //Handle a click
             if (drag) {
-                //Delete the component
-                if (e.shiftKey) {
-                    var component = findById(ctx, drag.id);
-                    if (component) {
-                        var index = components.indexOf(component);
-                        components.splice(index, 1);
-                        components.forEach(function (c) {
-                            c.incoming = c.incoming.filter(function (i) { return i.id !== drag.id; });
-                        });
-                    }
-                    //Finish a wire
+                var component = findById(ctx, drag.id);
+                if (componentClick(e, ctx, component).handled) {
+                    return;
                 }
-                else if (ctx.connectingFrom !== undefined) {
-                    var componentFrom = findById(ctx, ctx.connectingFrom);
-                    var componentTo = findById(ctx, drag.id);
-                    if (componentFrom && componentTo) {
-                        componentTo.incoming.push(componentFrom);
-                    }
-                    ctx.connectingFrom = undefined;
-                    //Start a wire
-                }
-                else {
-                    ctx.connectingFrom = drag.id;
-                }
-                ctx.drag = undefined;
-                return;
             }
             ctx.pan = undefined;
-            //We may have clicked a wire
-            var gridHalf = ctx.graphics.gridSize / 2;
-            for (var _i = 0, components_1 = components; _i < components_1.length; _i++) {
-                var _a = components_1[_i], pos = _a.pos, incoming = _a.incoming;
-                var pos1 = [pos[0] + gridHalf, pos[1] + gridHalf];
-                for (var i = 0; i < incoming.length; ++i) {
-                    var pos2 = incoming[i].pos;
-                    pos2 = [pos2[0] + gridHalf, pos2[1] + gridHalf];
-                    if (isPointNearLine(pos1, pos2, ctx.mouse, ctx.graphics.scale)) {
-                        incoming.splice(i, 1);
-                        ctx.drag = undefined;
-                        return;
+            //We may have clicked a wire (and so delete it)
+            if (e.button !== 2) {
+                var gridHalf = ctx.graphics.gridSize / 2;
+                for (var _i = 0, components_1 = components; _i < components_1.length; _i++) {
+                    var _a = components_1[_i], pos = _a.pos, incoming = _a.incoming;
+                    var pos1 = [pos[0] + gridHalf, pos[1] + gridHalf];
+                    for (var i = 0; i < incoming.length; ++i) {
+                        var pos2 = incoming[i].pos;
+                        pos2 = [pos2[0] + gridHalf, pos2[1] + gridHalf];
+                        if (isPointNearLine(pos1, pos2, ctx.mouse, ctx.graphics.scale)) {
+                            incoming.splice(i, 1);
+                            ctx.drag = undefined;
+                            return;
+                        }
                     }
                 }
             }
@@ -252,6 +282,7 @@ function DOM_onmouseup(ctx) {
             var component = findById(ctx, drag.id);
             if (component) {
                 snapToGrid(component);
+                componentsInGroup(component).forEach(snapToGrid);
             }
             ctx.drag = undefined;
         }
@@ -262,8 +293,6 @@ function DOM_onmouseup(ctx) {
 }
 function DOM_onkeydown(ctx) {
     return function (e) {
-        e.preventDefault();
-        e.stopPropagation();
         if (e.ctrlKey) {
             if (e.key === "s") {
                 saveComponents(ctx.components);
@@ -271,26 +300,29 @@ function DOM_onkeydown(ctx) {
             if (e.key === "o") {
                 loadComponents(ctx);
             }
+            e.preventDefault();
+            e.stopPropagation();
             return;
         }
         var graphics = ctx.graphics, components = ctx.components, snapToGrid = ctx.snapToGrid;
-        var _a = [
-            ctx.mouse[0] - graphics.gridSize / 2,
-            ctx.mouse[1] - graphics.gridSize / 2,
-        ], x = _a[0], y = _a[1];
         var newComponentType = keyToType[e.key];
+        var isPanel = newComponentType === "panel";
+        var gridHalf = graphics.gridSize / 2;
+        var _a = isPanel
+            ? ctx.mouse
+            : [ctx.mouse[0] - gridHalf, ctx.mouse[1] - gridHalf], x = _a[0], y = _a[1];
         if (newComponentType) {
             var newComponent = {
                 id: Math.random(),
                 pos: [x, y],
-                size: newComponentType === "panel"
-                    ? [graphics.gridSize, graphics.gridSize]
+                size: isPanel
+                    ? [graphics.gridSize * 10, graphics.gridSize * 5]
                     : graphics.gridSize / 2,
                 type: newComponentType,
                 text: typeToSymbol[newComponentType],
                 incoming: []
             };
-            if (newComponentType === "or") {
+            if (newComponentType === "or" || newComponentType === "not") {
                 newComponent.size = graphics.gridSize / 4;
             }
             snapToGrid(newComponent);
@@ -299,6 +331,10 @@ function DOM_onkeydown(ctx) {
     };
 }
 function saveComponents(components) {
+    var fileName = prompt("File name", "components");
+    if (!fileName) {
+        return;
+    }
     //Isolate component wires to only included components
     var includedIds = components.map(function (c) { return c.id; });
     var isolatedComponents = components.map(function (c) { return (__assign(__assign({}, c), { incoming: c.incoming.map(function (i) { return i.id; }).filter(function (i) { return includedIds.includes(i); }) })); });
@@ -320,7 +356,7 @@ function saveComponents(components) {
     var blob = new Blob([json], { type: "application/json" });
     var a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = "components.json";
+    a.download = "".concat(fileName, ".json");
     a.click();
 }
 function loadComponents(ctx) {
@@ -337,8 +373,14 @@ function loadComponents(ctx) {
             var json = reader.result;
             var savedComponents = JSON.parse(json);
             savedComponents.forEach(function (savedComponent) {
-                var component = __assign(__assign({}, savedComponent), { incoming: savedComponent.incoming.map(function (id) { return findById(ctx, id); }) });
+                var component = __assign(__assign({}, savedComponent), { incoming: [], incomingIds: savedComponent.incoming });
                 ctx.components.push(component);
+            });
+            ctx.components.forEach(function (component) {
+                var _a;
+                var _b, _c;
+                (_a = component.incoming).push.apply(_a, ((_c = (_b = component.incomingIds) === null || _b === void 0 ? void 0 : _b.map(function (id) { return findById(ctx, id); })) !== null && _c !== void 0 ? _c : []));
+                delete component.incomingIds;
             });
         };
         reader.readAsText(file);
@@ -398,7 +440,7 @@ function tick(ctx) {
             if (componentFrom) {
                 gtx.strokeStyle = "#000";
                 gtx.beginPath();
-                gtx.moveTo(componentFrom.pos[0] + gridHalf, componentFrom.pos[1] + gridHalf);
+                gtx.moveTo.apply(gtx, add(componentFrom.pos, gridHalf));
                 gtx.lineTo(ctx.mouse[0], ctx.mouse[1]);
                 gtx.stroke();
             }
@@ -407,9 +449,12 @@ function tick(ctx) {
         gtx.font = "24px Symbola";
         gtx.textAlign = "center";
         gtx.textBaseline = "middle";
-        components.forEach(function (_a) {
-            var _b = _a.pos, x = _b[0], y = _b[1], size = _a.size, symbol = _a.text, type = _a.type, live = _a.live;
-            gtx.fillStyle = typeToColour[type];
+        var panels = components.filter(function (c) { return c.type === "panel"; });
+        var other = components.filter(function (c) { return c.type !== "panel"; });
+        var drawComponent = function (component) {
+            var size = component.size, text = component.text, type = component.type, live = component.live;
+            var _a = component.pos, x = _a[0], y = _a[1];
+            gtx.fillStyle = componentColour({ type: type, live: live });
             if (Array.isArray(size)) {
                 gtx.fillRect.apply(gtx, __spreadArray([x, y], size, false));
             }
@@ -421,45 +466,33 @@ function tick(ctx) {
                 gtx.fill();
             }
             gtx.fillStyle = live ? "#fff" : "#000";
-            gtx.fillText(symbol, x, y + 1);
-        });
+            gtx.fillText(text, x, y + 1);
+        };
+        panels.forEach(drawComponent);
+        other.forEach(drawComponent);
     };
 }
 function calculateCharge(component) {
     var type = component.type, incoming = component.incoming;
-    if (type === "on") {
-        return true;
-    }
-    else if (type === "off") {
-        return undefined;
-    }
-    else if (type === "or") {
-        return incoming.some(function (_a) {
-            var live = _a.live;
-            return live;
-        }) || undefined;
-    }
-    else if (type === "and") {
-        return (incoming.length && incoming.every(function (_a) {
-            var live = _a.live;
-            return live;
-        })) || undefined;
-    }
-    else if (type === "not") {
-        return (incoming.length && !incoming.some(function (_a) {
-            var live = _a.live;
-            return live;
-        })) || undefined;
-    }
-    else if (type === "xor") {
-        var l = 0;
-        for (var i = 0; i < incoming.length; i++) {
-            l += Number(incoming[i].live);
-            if (l > 1) {
-                return undefined;
-            }
-        }
-        return l === 1 || undefined;
+    var live = incoming.filter(function (c) { return c.live; }).length;
+    var any = live > 0;
+    var all = incoming.length === live;
+    switch (type) {
+        case "on":
+            return true;
+        case "off":
+            return false;
+        case "or":
+        case "indicator":
+            return any;
+        case "and":
+            return any && all;
+        case "not":
+            return !any;
+        case "xor":
+            return live === 1;
+        case "rand":
+            return Math.random() < 0.5;
     }
 }
 function tock(_a) {
@@ -467,7 +500,7 @@ function tock(_a) {
     return function () {
         //Effect delayed electification
         components.forEach(function (component) {
-            if (component.charged) {
+            if (component.charged && component.type !== "off") {
                 component.live = true;
                 component.charged = undefined;
             }
@@ -477,7 +510,7 @@ function tock(_a) {
         });
         //Calculate delayed electification
         components.forEach(function (component) {
-            component.charged = calculateCharge(component);
+            component.charged = calculateCharge(component) || undefined;
         });
     };
 }
