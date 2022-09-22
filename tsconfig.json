@@ -6,7 +6,8 @@
     "outDir": "js",
     "strictNullChecks": true,
     "noUncheckedIndexedAccess": true,
-    "lib": ["es2016", "dom"],
-    "sourceMap": true
+    "lib": ["ESNext", "dom"],
+    "sourceMap": true,
+    "target": "ESNext"
   }
 }

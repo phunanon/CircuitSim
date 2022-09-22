@@ -54,8 +54,8 @@ const keyToType: Record<string, Component["type"]> = {
 
 const { abs, sqrt, sin, cos, round } = Math;
 
-function findById(ctx: Ctx, id: number) {
-  return ctx.components.find(c => c.id === id);
+function findById({ components }: Pick<Ctx, "components">, id: number) {
+  return components.find(c => c.id === id);
 }
 
 function mouseInCtx(ctx: Ctx, x = ctx.mouse[0], y = ctx.mouse[1]): v2d {
@@ -100,7 +100,7 @@ function add(v: v2d, n: number): v2d {
   return [v[0] + n, v[1] + n];
 }
 
-function DOM_onload() {
+async function DOM_onload() {
   const canvas = document.querySelector("canvas")!;
   const gtx = canvas.getContext("2d")!;
   const gridSize = 32;
@@ -123,6 +123,14 @@ function DOM_onload() {
   html.addEventListener("mouseup", DOM_onmouseup(ctx));
   html.addEventListener("keydown", DOM_onkeydown(ctx));
   canvas.addEventListener("contextmenu", e => e.preventDefault());
+  const { save, load } = store(ctx);
+  html.addEventListener("unload", save);
+  load();
+  if (!ctx.components.length) {
+    const demo = await (await fetch("demo.json")).text();
+    ctx.components = deserialise(demo);
+  }
+  setInterval(save, 10000);
 }
 
 function DOM_onscroll({ graphics }: Ctx) {
@@ -318,7 +326,7 @@ function DOM_onkeydown(ctx: Ctx) {
         saveComponents(ctx.components);
       }
       if (e.key === "o") {
-        loadComponents(ctx);
+        promptLoad(ctx);
       }
       e.preventDefault();
       e.stopPropagation();
@@ -351,11 +359,53 @@ function DOM_onkeydown(ctx: Ctx) {
   };
 }
 
+function store(ctx: Ctx) {
+  return {
+    save: () => localStorage.setItem("components", serialise(ctx)),
+    load: () => {
+      const json = localStorage.getItem("components") || "[]";
+      ctx.components = deserialise(json);
+    },
+  };
+}
+
 function saveComponents(components: Component[]) {
   const fileName = prompt("File name", "components");
   if (!fileName) {
     return;
   }
+  const json = serialise({ components });
+  const blob = new Blob([json], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `${fileName}.json`;
+  a.click();
+}
+
+function deserialise(json: string) {
+  type SavedComponent = Omit<Component, "incoming"> & {
+    incoming: number[];
+  };
+  const savedComponents: SavedComponent[] = JSON.parse(json);
+  const components: Component[] = [];
+  savedComponents.forEach(savedComponent => {
+    const component: Component = {
+      ...savedComponent,
+      incoming: [],
+      incomingIds: savedComponent.incoming,
+    };
+    components.push(component);
+  });
+  components.forEach(component => {
+    component.incoming.push(
+      ...(component.incomingIds?.map(id => findById({ components }, id)!) ?? [])
+    );
+    delete component.incomingIds;
+  });
+  return components;
+}
+
+function serialise({ components }: Pick<Ctx, "components">) {
   //Isolate component wires to only included components
   const includedIds = components.map(c => c.id);
   const isolatedComponents = components.map(c => ({
@@ -378,16 +428,11 @@ function saveComponents(components: Component[]) {
     c.pos = [c.pos[0] - topLeftMost[0]!, c.pos[1] - topLeftMost[1]!];
     c.group = undefined;
   });
-  //Save as JSON
-  const json = JSON.stringify(isolatedComponents);
-  const blob = new Blob([json], { type: "application/json" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `${fileName}.json`;
-  a.click();
+  //Serialise
+  return JSON.stringify(isolatedComponents);
 }
 
-function loadComponents(ctx: Ctx) {
+function promptLoad(ctx: Ctx) {
   const input = document.createElement("input");
   input.type = "file";
   input.onchange = () => {
@@ -398,24 +443,7 @@ function loadComponents(ctx: Ctx) {
     const reader = new FileReader();
     reader.onload = () => {
       const json = reader.result as string;
-      type SavedComponent = Omit<Component, "incoming"> & {
-        incoming: number[];
-      };
-      const savedComponents: SavedComponent[] = JSON.parse(json);
-      savedComponents.forEach(savedComponent => {
-        const component: Component = {
-          ...savedComponent,
-          incoming: [],
-          incomingIds: savedComponent.incoming,
-        };
-        ctx.components.push(component);
-      });
-      ctx.components.forEach(component => {
-        component.incoming.push(
-          ...(component.incomingIds?.map(id => findById(ctx, id)!) ?? [])
-        );
-        delete component.incomingIds;
-      });
+      ctx.components = deserialise(json);
     };
     reader.readAsText(file);
   };
@@ -535,10 +563,10 @@ function calculateCharge(component: Component) {
   }
 }
 
-function tock({ components }: Ctx) {
+function tock(ctx: Ctx) {
   return () => {
     //Effect delayed electification
-    components.forEach(component => {
+    ctx.components.forEach(component => {
       if (component.charged && component.type !== "off") {
         component.live = true;
         component.charged = undefined;
@@ -547,7 +575,7 @@ function tock({ components }: Ctx) {
       }
     });
     //Calculate delayed electification
-    components.forEach(component => {
+    ctx.components.forEach(component => {
       component.charged = calculateCharge(component) || undefined;
     });
   };
