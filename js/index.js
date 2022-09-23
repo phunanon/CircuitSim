@@ -54,22 +54,26 @@ function sub(a, b) {
 function add(v, n) {
     return [v[0] + n, v[1] + n];
 }
+function resetView(ctx) {
+    ctx.graphics.pan = [ctx.graphics.gridSize, ctx.graphics.gridSize];
+    ctx.graphics.scale = 1;
+}
 async function DOM_onload() {
     const canvas = document.querySelector("canvas");
     const gtx = canvas.getContext("2d");
     const gridSize = 32;
-    const pan = [gridSize, gridSize];
     const ctx = {
-        graphics: { canvas, gtx, gridSize, scale: 1, pan },
+        graphics: { canvas, gtx, gridSize, scale: 1, pan: [0, 0] },
         components: [],
         mouse: [0, 0],
         mouseMoved: false,
         electrification: "immediate",
-        snapToGrid: c => {
+        snappedToGrid: ([x, y]) => {
             const s = gridSize / 2;
-            c.pos = [round(c.pos[0] / s) * s, round(c.pos[1] / s) * s];
-        },
+            return [round(x / s) * s, round(y / s) * s];
+        }
     };
+    resetView(ctx);
     setInterval(tick(ctx), 1000 / 20);
     setInterval(tock(ctx), 1000 / 4);
     const html = document.querySelector("html");
@@ -134,21 +138,24 @@ function DOM_onmousedown(ctx) {
                     Array.isArray(component.size)) {
                     component.size[0] /= halfGrid;
                     component.size[1] /= halfGrid;
-                    const prompted = prompt("Panel size", component.size.toString());
-                    const [w, h] = prompted?.split(/, ?/).map(Number) ?? [0, 0];
+                    const prompted = prompt("Panel size; panel text", `${component.size};${component.text}`);
+                    const [size, text] = prompted?.split(";") ?? [];
+                    const [w, h] = size?.split(/, ?/).map(Number) ?? [0, 0];
+                    component.text = text ?? "";
                     component.size = [w || component.size[0], h || component.size[1]];
                     component.size[0] *= halfGrid;
                     component.size[1] *= halfGrid;
                 }
-                //Drag component
             }
             else {
+                //Drag component
                 const calcOffset = ([x, y]) => [
                     (e.clientX - panX - x * scale) / scale,
                     (e.clientY - panY - y * scale) / scale,
                 ];
                 const offset = calcOffset(component.pos);
                 ctx.drag = { id: component.id, offset };
+                //Calculate panel group
                 if (component.type === "panel") {
                     component.group = ctx.components
                         .filter(touchingPanel(component, gridSize))
@@ -226,7 +233,7 @@ function componentClick(e, ctx, component) {
 }
 function DOM_onmouseup(ctx) {
     return (e) => {
-        const { components, drag, pan, mouseMoved, snapToGrid } = ctx;
+        const { components, drag, pan, mouseMoved, snappedToGrid } = ctx;
         if (!mouseMoved) {
             //Handle a click
             if (drag) {
@@ -255,10 +262,16 @@ function DOM_onmouseup(ctx) {
             ctx.connectingFrom = undefined;
             return;
         }
+        else if (drag) {
+            //Move component to top
+            const index = ctx.components.findIndex(c => c.id === drag.id);
+            ctx.components.unshift(ctx.components.splice(index, 1)[0]);
+        }
         if (drag) {
             const component = findById(ctx, drag.id);
             if (component) {
-                snapToGrid(component);
+                component.pos = snappedToGrid(component.pos);
+                const snapToGrid = (c) => (c.pos = snappedToGrid(c.pos));
                 componentsInGroup(component).forEach(snapToGrid);
             }
             ctx.drag = undefined;
@@ -276,30 +289,36 @@ function DOM_onkeydown(ctx) {
             }
             if (e.key === "o") {
                 promptLoad(ctx);
+                resetView(ctx);
+            }
+            if (e.key === "O") {
+                const pos = ctx.mouse;
+                promptLoad(ctx, pos);
             }
             if (e.key === "e") {
                 ctx.electrification =
                     ctx.electrification === "step" ? "immediate" : "step";
-                ctx.components.forEach(c => (delete c.visited));
+                ctx.components.forEach(c => delete c.visited);
             }
             e.preventDefault();
             e.stopPropagation();
             return;
         }
-        const { graphics, components, snapToGrid } = ctx;
+        const { graphics, components, snappedToGrid } = ctx;
         const newComponentType = keyToType[e.key];
         const isPanel = newComponentType === "panel";
+        const isIndicator = newComponentType === "indicator";
         const gridHalf = graphics.gridSize / 2;
-        const [x, y] = isPanel
-            ? ctx.mouse
-            : [ctx.mouse[0] - gridHalf, ctx.mouse[1] - gridHalf];
+        const [x, y] = [ctx.mouse[0] - gridHalf, ctx.mouse[1] - gridHalf];
         if (newComponentType) {
             const newComponent = {
                 id: Math.random(),
                 pos: [x, y],
                 size: isPanel
                     ? [graphics.gridSize * 10, graphics.gridSize * 5]
-                    : graphics.gridSize,
+                    : isIndicator
+                        ? [graphics.gridSize, graphics.gridSize]
+                        : graphics.gridSize,
                 type: newComponentType,
                 text: typeToSymbol[newComponentType],
                 incoming: [],
@@ -307,7 +326,7 @@ function DOM_onkeydown(ctx) {
             if (newComponentType === "or" || newComponentType === "not") {
                 newComponent.size = graphics.gridSize / 2;
             }
-            snapToGrid(newComponent);
+            newComponent.pos = snappedToGrid(newComponent.pos);
             components.push(newComponent);
         }
     };
@@ -333,7 +352,7 @@ function saveComponents(components) {
     a.download = `${fileName}.json`;
     a.click();
 }
-function deserialise(json) {
+function deserialise(json, pos) {
     const savedComponents = JSON.parse(json);
     const components = [];
     savedComponents.forEach(savedComponent => {
@@ -348,6 +367,13 @@ function deserialise(json) {
         component.incoming.push(...(component.incomingIds?.map(id => findById({ components }, id)) ?? []));
         delete component.incomingIds;
     });
+    if (pos) {
+        //Move to mouse position
+        components.forEach(component => {
+            component.pos[0] += pos[0];
+            component.pos[1] += pos[1];
+        });
+    }
     return components;
 }
 function serialise({ components }) {
@@ -372,7 +398,7 @@ function serialise({ components }) {
     //Serialise
     return JSON.stringify(isolatedComponents);
 }
-function promptLoad(ctx) {
+function promptLoad(ctx, asComponent) {
     const input = document.createElement("input");
     input.type = "file";
     input.onchange = () => {
@@ -383,7 +409,14 @@ function promptLoad(ctx) {
         const reader = new FileReader();
         reader.onload = () => {
             const json = reader.result;
-            ctx.components = deserialise(json);
+            if (asComponent) {
+                const newComponents = deserialise(json, asComponent);
+                newComponents.forEach(c => (c.pos = ctx.snappedToGrid(c.pos)));
+                ctx.components.push(...newComponents);
+            }
+            else {
+                ctx.components = deserialise(json);
+            }
         };
         reader.readAsText(file);
     };
@@ -433,8 +466,6 @@ function tick(ctx) {
         }
         //Draw components
         gtx.font = "24px Symbola";
-        gtx.textAlign = "center";
-        gtx.textBaseline = "middle";
         const panels = components.filter(c => c.type === "panel");
         const other = components.filter(c => c.type !== "panel");
         const drawComponent = (component) => {
@@ -452,7 +483,16 @@ function tick(ctx) {
                 gtx.fill();
             }
             gtx.fillStyle = live ? "#fff" : "#000";
-            gtx.fillText(text, x, y + 1);
+            if (type === "panel") {
+                gtx.textAlign = "left";
+                gtx.textBaseline = "top";
+                gtx.fillText(text, x, y + 1);
+            }
+            else {
+                gtx.textAlign = "center";
+                gtx.textBaseline = "middle";
+                gtx.fillText(text, x, y + 1);
+            }
         };
         panels.reverse().forEach(drawComponent);
         //Draw connections on top of panels

@@ -7,7 +7,7 @@ type Component = {
   pos: v2d;
   size: v2d | number;
   type: Gates | "on" | "off" | "indicator" | "panel" | "rand";
-  text: "&" | "•" | "~" | "⊕" | "⭘" | "⏻" | "⚂" | "";
+  text: "&" | "•" | "~" | "⊕" | "⭘" | "⏻" | "⚂" | "" | string;
   incoming: Component[];
   incomingIds?: number[];
   visited?: true;
@@ -33,7 +33,7 @@ type Ctx = {
   mouse: v2d;
   mouseMoved: boolean;
   connectingFrom?: number;
-  snapToGrid: (c: Component) => void;
+  snappedToGrid: (pos: v2d) => v2d;
 };
 
 const typeToSymbol: Record<Component["type"], Component["text"]> = {
@@ -101,22 +101,27 @@ function add(v: v2d, n: number): v2d {
   return [v[0] + n, v[1] + n];
 }
 
+function resetView(ctx: Ctx) {
+  ctx.graphics.pan = [ctx.graphics.gridSize, ctx.graphics.gridSize];
+  ctx.graphics.scale = 1;
+}
+
 async function DOM_onload() {
   const canvas = document.querySelector("canvas")!;
   const gtx = canvas.getContext("2d")!;
   const gridSize = 32;
-  const pan: v2d = [gridSize, gridSize];
   const ctx: Ctx = {
-    graphics: { canvas, gtx, gridSize, scale: 1, pan },
+    graphics: { canvas, gtx, gridSize, scale: 1, pan: [0,0] },
     components: [],
     mouse: [0, 0],
     mouseMoved: false,
     electrification: "immediate",
-    snapToGrid: c => {
+    snappedToGrid: ([x, y]: v2d) => {
       const s = gridSize / 2;
-      c.pos = [round(c.pos[0] / s) * s, round(c.pos[1] / s) * s];
-    },
+      return [round(x / s) * s, round(y / s) * s];
+    }
   };
+  resetView(ctx);
   setInterval(tick(ctx), 1000 / 20);
   setInterval(tock(ctx), 1000 / 4);
   const html = document.querySelector("html")!;
@@ -189,20 +194,26 @@ function DOM_onmousedown(ctx: Ctx) {
         ) {
           component.size[0] /= halfGrid;
           component.size[1] /= halfGrid;
-          const prompted = prompt("Panel size", component.size.toString());
-          const [w, h] = prompted?.split(/, ?/).map(Number) ?? [0, 0];
+          const prompted = prompt(
+            "Panel size; panel text",
+            `${component.size};${component.text}`
+          );
+          const [size, text] = prompted?.split(";") ?? [];
+          const [w, h] = size?.split(/, ?/).map(Number) ?? [0, 0];
+          component.text = text ?? "";
           component.size = [w || component.size[0], h || component.size[1]];
           component.size[0] *= halfGrid;
           component.size[1] *= halfGrid;
         }
-        //Drag component
       } else {
+        //Drag component
         const calcOffset = ([x, y]: v2d): v2d => [
           (e.clientX - panX - x * scale) / scale,
           (e.clientY - panY - y * scale) / scale,
         ];
         const offset: v2d = calcOffset(component.pos);
         ctx.drag = { id: component.id, offset };
+        //Calculate panel group
         if (component.type === "panel") {
           component.group = ctx.components
             .filter(touchingPanel(component, gridSize))
@@ -280,7 +291,7 @@ function componentClick(e: MouseEvent, ctx: Ctx, component: Component) {
 
 function DOM_onmouseup(ctx: Ctx) {
   return (e: MouseEvent) => {
-    const { components, drag, pan, mouseMoved, snapToGrid } = ctx;
+    const { components, drag, pan, mouseMoved, snappedToGrid } = ctx;
     if (!mouseMoved) {
       //Handle a click
       if (drag) {
@@ -308,11 +319,16 @@ function DOM_onmouseup(ctx: Ctx) {
       }
       ctx.connectingFrom = undefined;
       return;
+    } else if (drag) {
+      //Move component to top
+      const index = ctx.components.findIndex(c => c.id === drag.id);
+      ctx.components.unshift(ctx.components.splice(index, 1)[0]!);
     }
     if (drag) {
       const component = findById(ctx, drag.id);
       if (component) {
-        snapToGrid(component);
+        component.pos = snappedToGrid(component.pos);
+        const snapToGrid = (c: Component) => (c.pos = snappedToGrid(c.pos));
         componentsInGroup(component).forEach(snapToGrid);
       }
       ctx.drag = undefined;
@@ -330,29 +346,35 @@ function DOM_onkeydown(ctx: Ctx) {
       }
       if (e.key === "o") {
         promptLoad(ctx);
+        resetView(ctx);
+      }
+      if (e.key === "O") {
+        const pos = ctx.mouse;
+        promptLoad(ctx, pos);
       }
       if (e.key === "e") {
         ctx.electrification =
           ctx.electrification === "step" ? "immediate" : "step";
-        ctx.components.forEach(c => (delete c.visited));
+        ctx.components.forEach(c => delete c.visited);
       }
       e.preventDefault();
       e.stopPropagation();
       return;
     }
-    const { graphics, components, snapToGrid } = ctx;
+    const { graphics, components, snappedToGrid } = ctx;
     const newComponentType = keyToType[e.key];
     const isPanel = newComponentType === "panel";
+    const isIndicator = newComponentType === "indicator";
     const gridHalf = graphics.gridSize / 2;
-    const [x, y] = isPanel
-      ? ctx.mouse
-      : [ctx.mouse[0] - gridHalf, ctx.mouse[1] - gridHalf];
+    const [x, y] = [ctx.mouse[0] - gridHalf, ctx.mouse[1] - gridHalf];
     if (newComponentType) {
       const newComponent: Component = {
         id: Math.random(),
         pos: [x, y],
         size: isPanel
           ? [graphics.gridSize * 10, graphics.gridSize * 5]
+          : isIndicator
+          ? [graphics.gridSize, graphics.gridSize]
           : graphics.gridSize,
         type: newComponentType,
         text: typeToSymbol[newComponentType],
@@ -361,7 +383,7 @@ function DOM_onkeydown(ctx: Ctx) {
       if (newComponentType === "or" || newComponentType === "not") {
         newComponent.size = graphics.gridSize / 2;
       }
-      snapToGrid(newComponent);
+      newComponent.pos = snappedToGrid(newComponent.pos);
       components.push(newComponent);
     }
   };
@@ -390,7 +412,7 @@ function saveComponents(components: Component[]) {
   a.click();
 }
 
-function deserialise(json: string) {
+function deserialise(json: string, pos?: v2d) {
   type SavedComponent = Omit<Component, "incoming"> & {
     incoming: number[];
   };
@@ -410,6 +432,13 @@ function deserialise(json: string) {
     );
     delete component.incomingIds;
   });
+  if (pos) {
+    //Move to mouse position
+    components.forEach(component => {
+      component.pos[0] += pos[0];
+      component.pos[1] += pos[1];
+    });
+  }
   return components;
 }
 
@@ -440,7 +469,7 @@ function serialise({ components }: Pick<Ctx, "components">) {
   return JSON.stringify(isolatedComponents);
 }
 
-function promptLoad(ctx: Ctx) {
+function promptLoad(ctx: Ctx, asComponent?: v2d) {
   const input = document.createElement("input");
   input.type = "file";
   input.onchange = () => {
@@ -451,7 +480,13 @@ function promptLoad(ctx: Ctx) {
     const reader = new FileReader();
     reader.onload = () => {
       const json = reader.result as string;
-      ctx.components = deserialise(json);
+      if (asComponent) {
+        const newComponents = deserialise(json, asComponent);
+        newComponents.forEach(c => (c.pos = ctx.snappedToGrid(c.pos)));
+        ctx.components.push(...newComponents);
+      } else {
+        ctx.components = deserialise(json);
+      }
     };
     reader.readAsText(file);
   };
@@ -505,8 +540,6 @@ function tick(ctx: Ctx) {
     }
     //Draw components
     gtx.font = "24px Symbola";
-    gtx.textAlign = "center";
-    gtx.textBaseline = "middle";
     const panels = components.filter(c => c.type === "panel");
     const other = components.filter(c => c.type !== "panel");
     const drawComponent = (component: Component) => {
@@ -523,7 +556,15 @@ function tick(ctx: Ctx) {
         gtx.fill();
       }
       gtx.fillStyle = live ? "#fff" : "#000";
-      gtx.fillText(text, x, y + 1);
+      if (type === "panel") {
+        gtx.textAlign = "left";
+        gtx.textBaseline = "top";
+        gtx.fillText(text, x, y + 1);
+      } else {
+        gtx.textAlign = "center";
+        gtx.textBaseline = "middle";
+        gtx.fillText(text, x, y + 1);
+      }
     };
     panels.reverse().forEach(drawComponent);
     //Draw connections on top of panels

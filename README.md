@@ -31,6 +31,7 @@ Descendant of [Sircuit](https://github.com/phunanon/Sircuit)
 - Ctrl + click panel to save to JSON
 - Ctrl + S to save scene to JSON
 - Ctrl + O to load scene / panel from JSON
+- Ctrl + Shift + O load scene / panel as component from JSON
 - Ctrl + E to switch between immediate and step electrification
 - Right click switch to toggle
 - Right click panel to change size
