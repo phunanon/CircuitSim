@@ -58,11 +58,13 @@ async function DOM_onload() {
     const canvas = document.querySelector("canvas");
     const gtx = canvas.getContext("2d");
     const gridSize = 32;
+    const pan = [gridSize, gridSize];
     const ctx = {
-        graphics: { canvas, gtx, gridSize, scale: 1, pan: [0, 0] },
+        graphics: { canvas, gtx, gridSize, scale: 1, pan },
         components: [],
         mouse: [0, 0],
         mouseMoved: false,
+        electrification: "immediate",
         snapToGrid: c => {
             const s = gridSize / 2;
             c.pos = [round(c.pos[0] / s) * s, round(c.pos[1] / s) * s];
@@ -275,6 +277,11 @@ function DOM_onkeydown(ctx) {
             if (e.key === "o") {
                 promptLoad(ctx);
             }
+            if (e.key === "e") {
+                ctx.electrification =
+                    ctx.electrification === "step" ? "immediate" : "step";
+                ctx.components.forEach(c => (delete c.visited));
+            }
             e.preventDefault();
             e.stopPropagation();
             return;
@@ -477,7 +484,7 @@ function calculateCharge(component) {
         case "on":
             return true;
         case "off":
-            return false;
+            return any;
         case "or":
         case "indicator":
             return any;
@@ -491,22 +498,57 @@ function calculateCharge(component) {
             return Math.random() < 0.5;
     }
 }
+function stepElectrification(ctx) {
+    //Effect delayed electification
+    ctx.components.forEach(component => {
+        if (component.visited && component.type !== "off") {
+            component.live = true;
+            component.visited = undefined;
+        }
+        else {
+            component.live = component.type === "on" || undefined;
+        }
+    });
+    //Calculate delayed electification
+    ctx.components.forEach(component => {
+        component.visited = calculateCharge(component) || undefined;
+    });
+}
+function immediateElectrification(ctx) {
+    ctx.components.forEach(component => {
+        delete component.visited;
+        delete component.live;
+    });
+    let unresolved = ctx.components.filter(c => !c.live);
+    const stillUnresolved = (component) => {
+        if (!component.incoming) {
+            component.visited = true;
+            return false;
+        }
+        if (component.incoming.some(c => !c.visited)) {
+            return true;
+        }
+        component.live = true;
+        if (!calculateCharge(component)) {
+            delete component.live;
+        }
+        component.visited = true;
+        return false;
+    };
+    let previouslyUnresolved = unresolved.length;
+    while (unresolved.length) {
+        unresolved = unresolved.filter(stillUnresolved);
+        if (unresolved.length === previouslyUnresolved) {
+            break;
+        }
+        previouslyUnresolved = unresolved.length;
+    }
+}
 function tock(ctx) {
     return () => {
-        //Effect delayed electification
-        ctx.components.forEach(component => {
-            if (component.charged && component.type !== "off") {
-                component.live = true;
-                component.charged = undefined;
-            }
-            else {
-                component.live = component.type === "on" || undefined;
-            }
-        });
-        //Calculate delayed electification
-        ctx.components.forEach(component => {
-            component.charged = calculateCharge(component) || undefined;
-        });
+        (ctx.electrification === "step"
+            ? stepElectrification
+            : immediateElectrification)(ctx);
     };
 }
 //# sourceMappingURL=index.js.map
