@@ -7,10 +7,10 @@ type Component = {
   pos: v2d;
   size: v2d | number;
   type: Gates | "on" | "off" | "indicator" | "panel" | "rand";
-  text: "&" | "•" | "~" | "⊕" | "⭘" | "⏻" | "⚂" | "" | string;
+  text: "&" | "•" | "~" | "⊕" | "⭘" | "●" | "⚂" | "" | string;
   incoming: Component[];
   incomingIds?: number[];
-  visited?: true;
+  staged?: true;
   live?: true;
   group?: [Component, v2d][];
 };
@@ -38,7 +38,7 @@ type Ctx = {
 
 const typeToSymbol: Record<Component["type"], Component["text"]> = {
   ...{ and: "&", or: "•", not: "~", xor: "⊕" },
-  ...{ on: "⭘", off: "⏻", indicator: "", panel: "", rand: "⚂" },
+  ...{ on: "●", off: "⭘", indicator: "", panel: "", rand: "⚂" },
 };
 function componentColour({ type, live }: Pick<Component, "type" | "live">) {
   const types = ["and", "or", "not", "xor", "on", "off", "rand", "panel"];
@@ -111,7 +111,7 @@ async function DOM_onload() {
   const gtx = canvas.getContext("2d")!;
   const gridSize = 32;
   const ctx: Ctx = {
-    graphics: { canvas, gtx, gridSize, scale: 1, pan: [0,0] },
+    graphics: { canvas, gtx, gridSize, scale: 1, pan: [0, 0] },
     components: [],
     mouse: [0, 0],
     mouseMoved: false,
@@ -119,7 +119,7 @@ async function DOM_onload() {
     snappedToGrid: ([x, y]: v2d) => {
       const s = gridSize / 2;
       return [round(x / s) * s, round(y / s) * s];
-    }
+    },
   };
   resetView(ctx);
   setInterval(tick(ctx), 1000 / 20);
@@ -178,16 +178,16 @@ function DOM_onmousedown(ctx: Ctx) {
         sqrt((px - x - halfGrid) ** 2 + (py - y - halfGrid) ** 2) < size / 2
       );
     });
-    const component = components.find(c => c.type !== "panel") || components[0];
+    const component = components.find(c => c.type !== "panel") ?? components[0];
     if (component) {
       //Interact with component
       if (e.button === 2) {
         if (component.type === "on") {
           component.type = "off";
-          component.text = "⏻";
+          component.text = typeToSymbol.off;
         } else if (component.type === "off") {
           component.type = "on";
-          component.text = "⭘";
+          component.text = typeToSymbol.on;
         } else if (
           component.type === "panel" &&
           Array.isArray(component.size)
@@ -201,7 +201,7 @@ function DOM_onmousedown(ctx: Ctx) {
           const [size, text] = prompted?.split(";") ?? [];
           const [w, h] = size?.split(/, ?/).map(Number) ?? [0, 0];
           component.text = text ?? "";
-          component.size = [w || component.size[0], h || component.size[1]];
+          component.size = [w ?? component.size[0], h ?? component.size[1]];
           component.size[0] *= halfGrid;
           component.size[1] *= halfGrid;
         }
@@ -219,7 +219,7 @@ function DOM_onmousedown(ctx: Ctx) {
             .filter(touchingPanel(component, gridSize))
             .map(c => [c, calcOffset(c.pos)]);
         } else {
-          component.group = undefined;
+          delete component.group;
         }
       }
     } else {
@@ -274,7 +274,7 @@ function componentClick(e: MouseEvent, ctx: Ctx, component: Component) {
   } else if (isPanel && e.ctrlKey) {
     //Save the panel
     saveComponents([component, ...componentsInGroup(component)]);
-  } else if (ctx.connectingFrom !== undefined && component) {
+  } else if (ctx.connectingFrom !== undefined && component && !isPanel) {
     //Finish a wire
     const componentFrom = findById(ctx, ctx.connectingFrom);
     if (componentFrom) {
@@ -285,7 +285,7 @@ function componentClick(e: MouseEvent, ctx: Ctx, component: Component) {
     //Start a wire
     ctx.connectingFrom = component.id;
   }
-  ctx.drag = undefined;
+  delete ctx.drag;
   return { handled: !isPanel };
 }
 
@@ -300,7 +300,7 @@ function DOM_onmouseup(ctx: Ctx) {
           return;
         }
       }
-      ctx.pan = undefined;
+      delete ctx.pan;
       //We may have clicked a wire (and so delete it)
       if (e.button !== 2) {
         const gridHalf = ctx.graphics.gridSize / 2;
@@ -311,13 +311,13 @@ function DOM_onmouseup(ctx: Ctx) {
             pos2 = [pos2[0] + gridHalf, pos2[1] + gridHalf];
             if (isPointNearLine(pos1, pos2, ctx.mouse, ctx.graphics.scale)) {
               incoming.splice(i, 1);
-              ctx.drag = undefined;
+              delete ctx.drag;
               return;
             }
           }
         }
       }
-      ctx.connectingFrom = undefined;
+      delete ctx.connectingFrom;
       return;
     } else if (drag) {
       //Move component to top
@@ -331,9 +331,9 @@ function DOM_onmouseup(ctx: Ctx) {
         const snapToGrid = (c: Component) => (c.pos = snappedToGrid(c.pos));
         componentsInGroup(component).forEach(snapToGrid);
       }
-      ctx.drag = undefined;
+      delete ctx.drag;
     } else if (pan) {
-      ctx.pan = undefined;
+      delete ctx.pan;
     }
   };
 }
@@ -355,7 +355,7 @@ function DOM_onkeydown(ctx: Ctx) {
       if (e.key === "e") {
         ctx.electrification =
           ctx.electrification === "step" ? "immediate" : "step";
-        ctx.components.forEach(c => delete c.visited);
+        ctx.components.forEach(c => delete c.staged);
       }
       e.preventDefault();
       e.stopPropagation();
@@ -393,7 +393,7 @@ function store(ctx: Ctx) {
   return {
     save: () => localStorage.setItem("components", serialise(ctx)),
     load: () => {
-      const json = localStorage.getItem("components") || "[]";
+      const json = localStorage.getItem("components") ?? "[]";
       ctx.components = deserialise(json);
     },
   };
@@ -463,7 +463,7 @@ function serialise({ components }: Pick<Ctx, "components">) {
   );
   isolatedComponents.forEach(c => {
     c.pos = [c.pos[0] - topLeftMost[0]!, c.pos[1] - topLeftMost[1]!];
-    c.group = undefined;
+    delete c.group;
   });
   //Serialise
   return JSON.stringify(isolatedComponents);
@@ -604,7 +604,7 @@ function calculateCharge(component: Component) {
     case "and":
       return any && all;
     case "not":
-      return incoming.length && !any;
+      return !any;
     case "xor":
       return live === 1;
     case "rand":
@@ -615,38 +615,34 @@ function calculateCharge(component: Component) {
 function stepElectrification(ctx: Ctx) {
   //Effect delayed electification
   ctx.components.forEach(component => {
-    if (component.visited && component.type !== "off") {
+    if (component.staged && component.type !== "off") {
       component.live = true;
-      component.visited = undefined;
+      delete component.staged;
     } else {
       component.live = component.type === "on" || undefined;
     }
   });
   //Calculate delayed electification
   ctx.components.forEach(component => {
-    component.visited = calculateCharge(component) || undefined;
+    component.staged = calculateCharge(component) || undefined;
   });
 }
 
 function immediateElectrification(ctx: Ctx) {
   ctx.components.forEach(component => {
-    delete component.visited;
+    delete component.staged;
     delete component.live;
   });
-  let unresolved = ctx.components.filter(c => !c.live);
+  let unresolved = ctx.components.slice();
   const stillUnresolved = (component: Component) => {
-    if (!component.incoming) {
-      component.visited = true;
-      return false;
-    }
-    if (component.incoming.some(c => !c.visited)) {
+    if (component.incoming.some(c => !c.staged)) {
       return true;
     }
     component.live = true;
     if (!calculateCharge(component)) {
       delete component.live;
     }
-    component.visited = true;
+    component.staged = true;
     return false;
   };
   let previouslyUnresolved = unresolved.length;
