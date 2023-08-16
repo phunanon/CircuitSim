@@ -34,10 +34,10 @@ Descendant of [Sircuit](https://github.com/phunanon/Sircuit)
 - Ctrl + Shift + O load scene / panel as component from JSON
 - Ctrl + E to switch between immediate and step electrification
 - Right click switch to toggle
-- Right click panel to change size
+- Right click panel to change size and label
 
-### TODO
+### Aspirations
 
-- Label panels (it's feasible)
 - Panel resize with mouse
 - Panel colours
+- Abstract away logic into components
